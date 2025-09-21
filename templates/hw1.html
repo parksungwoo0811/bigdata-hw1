@@ -1,0 +1,559 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>/hw1 - 빅데이터 과제 1 (주제+계획서)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        --bg: #0f1115;
+        --card: #171923;
+        --text: #e8eaf2;
+        --muted: #9aa3b2;
+        --accent: #7aa2f7;
+      }
+      body {
+        margin: 0;
+        padding: 24px;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          system-ui,
+          -apple-system,
+          Segoe UI,
+          Roboto,
+          Apple SD Gothic Neo,
+          Noto Sans KR,
+          sans-serif;
+        line-height: 1.6;
+      }
+      .wrap {
+        max-width: 1100px;
+        margin: 0 auto;
+      }
+      h1 {
+        font-size: 28px;
+        margin: 0 0 12px;
+      }
+      h2 {
+        font-size: 22px;
+        margin: 28px 0 10px;
+      }
+      h3 {
+        font-size: 18px;
+        margin: 16px 0 6px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid #262a36;
+        border-radius: 12px;
+        padding: 18px;
+        margin: 14px 0;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+      }
+      ul {
+        margin: 6px 0 6px 20px;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .mono {
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+      }
+      .pill {
+        display: inline-block;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: #1d2333;
+        border: 1px solid #2b3040;
+        margin-right: 8px;
+      }
+      .flow {
+        white-space: pre-wrap;
+      }
+      .svg-frame {
+        background: #0d1018;
+        border: 1px solid #2b3040;
+        border-radius: 12px;
+        padding: 8px;
+      }
+      .small {
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>외출 적합도 검사 (Flask로 프로젝트 주제 및 계획서-hw1)</h1>
+      <div class="muted small">
+        실행 <span class="mono">python app.py</span> → 접속
+        <span class="mono">http://127.0.0.1:5050/hw1</span>
+      </div>
+
+      <!-- 1) Problem Statement Canvas (요구 필드 반영) -->
+      <h2>1) Problem Statement Canvas</h2>
+      <div class="card">
+        <h3>고객(Who)</h3>
+        <ul>
+          <li>
+            대학생·직장인: 출퇴근/통학/외출 전 빠르게 복장을 결정해야 하는
+            사용자
+          </li>
+          <li>야외활동(러닝/등산/데이트) 계획이 있는 일반 사용자</li>
+          <li>미세먼지·날씨에 민감한 사용자(천식/알러지 등 민감군 포함)</li>
+        </ul>
+
+        <h3>컨텍스트(언제 문제가 발생?)</h3>
+        <ul>
+          <li>
+            아침 또는 외출 직전 5분 이내: 여러 앱(날씨/대기질/의류추천)을 번갈아
+            확인
+          </li>
+          <li>
+            급변하는 날씨/미세먼지 상황(황사·초미세먼지, 돌풍/소나기)에서 판단이
+            더 어려움
+          </li>
+          <li>여러 지역 이동(학교→알바→집) 시 지역별 지표를 각각 찾아야 함</li>
+        </ul>
+
+        <h3>근본 문제(5 Whys 요약)</h3>
+        <ol>
+          <li>
+            왜 결정이 느린가? → 정보가 흩어져 있어 한 화면에서 종합 판단이
+            어렵다.
+          </li>
+          <li>
+            왜 흩어져 있나? → 날씨/대기질/체감온도/강수/바람 정보가 서로 다른
+            서비스에 분산.
+          </li>
+          <li>
+            왜 통합이 안 되었나? → 각 서비스의 지표 단위·등급·시간축이 달라 즉시
+            비교가 어렵다.
+          </li>
+          <li>
+            왜 복장 결정이 더 어려운가? → 지표→행동(무엇을 입을지)로 바꾸는
+            룰/모델이 없다.
+          </li>
+          <li>
+            왜 최종적으로 실수하나? → 급변 상황(소나기·돌풍·PM2.5 급등)에 대한
+            경고/보강 아이템 제시가 없다.
+          </li>
+        </ol>
+
+        <h3>감정적 영향(Feelings)</h3>
+        <ul>
+          <li>불안·귀찮음: 앱/웹을 오가며 비교하는 번거로움</li>
+          <li>
+            후회·피로: 덥거나 춥게 입어서 불편, 우산/마스크 미지참으로 불쾌감
+          </li>
+          <li>신뢰 저하: 예보/지표가 제각각이라 어떤 걸 믿어야 할지 혼란</li>
+        </ul>
+
+        <h3>정량화 가능한 영향(Impact)</h3>
+        <ul>
+          <li>의사결정 시간: 평균 3~5분 → 통합 시 &lt; 30초 목표</li>
+          <li>
+            준비물 누락률(우산/마스크): 체감상 주 1~2회 → 경고/추천 후 누락률
+            50%↓ 목표
+          </li>
+          <li>
+            불쾌/불편 경험: 덥거나 춥게 입은 날 발생 빈도 월 4회 → 월 1회 이하
+            목표
+          </li>
+          <li>
+            재확인 횟수: 아침·점심·퇴근 전 2~3회 → 요약 배지/알림으로 1회 이하
+          </li>
+        </ul>
+
+        <h3>대안(현재 고객이 하는 방식)</h3>
+        <ul>
+          <li>날씨 앱 + 대기질 앱을 각각 열어 수치·등급을 수동 비교</li>
+          <li>포털 검색으로 시간대별 예보를 확인하고 경험적으로 복장 결정</li>
+          <li>우산·겉옷 등은 “혹시 몰라” 챙기거나 아예 포기</li>
+        </ul>
+
+        <h3>대안의 단점(Why not good enough)</h3>
+        <ul>
+          <li>시간 소모: 여러 앱 이동/수치 비교에 매번 3~5분</li>
+          <li>정합성 부족: 지표 단위·등급 차이로 즉시 판단 어려움</li>
+          <li>
+            행동 연결 부재: “무엇을 입을지/무엇을 챙길지”로 바로 변환되지 않음
+          </li>
+          <li>
+            급변 대응 약함: 소나기/돌풍/PM 급등 같은 예외 상황에 대한 보강
+            아이템 제안 없음
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- 2) 만들 솔루션 3줄 -->
+    <h2>2) 만들 솔루션 (3줄)</h2>
+    <div class="card">
+      <p>
+        ① 위치/시간으로 날씨(체감온도·강수·풍속)와 미세먼지를 조회해
+        <b>외출 적합도(0~100)</b>를 계산한다.
+      </p>
+      <p>
+        ② 점수·환경값을 바탕으로
+        <b>룰 기반 복장/아이템</b>(우산·마스크·겉옷)을 즉시 추천한다.
+      </p>
+      <p>
+        ③ 오늘/내일 <b>시간대별</b> 기온·PM2.5·강수·풍속을 미니 차트로 제공하고,
+        지역을 <b>즐겨찾기</b>로 저장한다.
+      </p>
+    </div>
+    <!-- 3) 기능 명세 (bullet) -->
+    <h2>3) 기능 명세</h2>
+    <div class="card">
+      <ul>
+        <li><b>위치 입력</b>: 현재 위치(GPS) 사용 또는 검색어로 지역 선택</li>
+        <li>
+          <b>데이터 수집</b>: OpenWeatherMap(체감온도·강수·풍속·예보),
+          AirKorea(PM2.5/PM10)
+        </li>
+        <li>
+          <b>외출 적합도 산식</b>: 온도쾌적도(40) + 대기질(35) + 강수(15) +
+          풍속(10) → 0~100 점수
+        </li>
+        <li>
+          <b>복장 추천</b>: 체감온도 구간별 기본 복장 + 강수/풍속/미세먼지
+          조건부 아이템(우산·마스크 등)
+        </li>
+        <li>
+          <b>시각화</b>: 오늘/내일 시간대별 기온·PM2.5·강수·풍속 미니 차트
+        </li>
+        <li><b>캐싱</b>: API 호출 10~15분 서버 캐시로 비용/지연 최소화</li>
+        <li>
+          <b>오류 처리</b>: API 장애 시 마지막 정상 데이터와 안내 문구 노출
+        </li>
+        <li><b>저장</b>(선택): 즐겨찾는 지역 추가/삭제 및 최근 조회 기록</li>
+      </ul>
+    </div>
+    <!-- 4) 간단한 UX 흐름 (flow) -->
+    <h2>4) 간단한 UX 흐름</h2>
+    <div class="card">
+      <ul>
+        <li><b>홈 화면</b></li>
+        <li>
+          <b>위치 선택</b>
+          <ul>
+            <li>현재 위치 사용</li>
+            <li>검색으로 위치 입력</li>
+          </ul>
+        </li>
+        <li><b>[조회]</b> 버튼 클릭</li>
+        <li>
+          <b>상단 요약</b>
+          <ul>
+            <li>외출 적합도 점수(색상 배지)</li>
+            <li>체감온도·강수·풍속·PM2.5 요약</li>
+          </ul>
+        </li>
+        <li>
+          <b>중앙 추천</b>
+          <ul>
+            <li>복장 추천 카드(필수/선택 아이템)</li>
+          </ul>
+        </li>
+        <li>
+          <b>하단 차트</b>
+          <ul>
+            <li>시간대별 기온·PM2.5·강수·풍속</li>
+            <li>탭 전환으로 지표 변경</li>
+          </ul>
+        </li>
+        <li>
+          <b>즐겨찾기</b>
+          <ul>
+            <li>지역 추가/삭제 및 빠른 재조회</li>
+          </ul>
+        </li>
+      </ul>
+    </div>
+
+    <!-- 5) 와이어프레임 (주제 반영: 외출/복장 추천 UX 흐름) -->
+    <h2>5) 와이어프레임 (스케치 이미지 1장)</h2>
+    <div class="card svg-frame">
+      <svg
+        width="100%"
+        viewBox="0 0 1400 720"
+        xmlns="http://www.w3.org/2000/svg"
+        aria-label="와이어프레임"
+      >
+        <defs>
+          <marker
+            id="arrow"
+            viewBox="0 0 10 10"
+            refX="9"
+            refY="5"
+            markerWidth="7"
+            markerHeight="7"
+            orient="auto"
+          >
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#f0ad2c" />
+          </marker>
+          <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+            <feDropShadow
+              dx="0"
+              dy="2"
+              stdDeviation="3"
+              flood-color="#000"
+              flood-opacity="0.35"
+            />
+          </filter>
+        </defs>
+
+        <!-- 배경 -->
+        <rect x="0" y="0" width="1200" height="720" fill="#0f1115" />
+
+        <text
+          x="40"
+          y="60"
+          font-size="38"
+          fill="#e8eaf2"
+          font-family="sans-serif"
+        >
+          Wireframes: 외출/복장 추천 UX
+        </text>
+
+        <!-- ===== 화면 1: 홈 ===== -->
+        <g transform="translate(60,110)" filter="url(#shadow)">
+          <rect
+            x="0"
+            y="0"
+            width="210"
+            height="470"
+            rx="22"
+            fill="#111624"
+            stroke="#2b3040"
+          />
+          <text
+            x="65"
+            y="40"
+            fill="#e8eaf2"
+            font-size="16"
+            font-family="sans-serif"
+          >
+            홈 화면
+          </text>
+          <rect x="20" y="80" width="170" height="40" rx="8" fill="#1a2033" />
+          <text x="40" y="105" fill="#b8c0d4" font-size="14">[현재위치]</text>
+          <rect x="20" y="140" width="170" height="40" rx="8" fill="#1a2033" />
+          <text x="40" y="165" fill="#b8c0d4" font-size="14">[위치검색]</text>
+          <rect x="20" y="200" width="170" height="40" rx="8" fill="#0f8cff" />
+          <text x="65" y="225" fill="#fff" font-size="14">조회</text>
+        </g>
+        <g transform="translate(80,95)">
+          <rect
+            x="0"
+            y="0"
+            rx="12"
+            ry="12"
+            width="80"
+            height="28"
+            fill="#6f42c1"
+          />
+          <text x="18" y="19" fill="#fff" font-size="13">Home</text>
+        </g>
+
+        <!-- ===== 화면 2: 상단(요약) ===== -->
+        <g transform="translate(330,110)" filter="url(#shadow)">
+          <rect
+            x="0"
+            y="0"
+            width="210"
+            height="470"
+            rx="22"
+            fill="#111624"
+            stroke="#2b3040"
+          />
+          <text x="35" y="40" fill="#e8eaf2" font-size="16">상단 요약</text>
+          <circle cx="105" cy="120" r="40" fill="#1f6b3a" />
+          <text x="90" y="125" fill="#fff" font-size="20">82</text>
+          <text x="35" y="190" fill="#e8eaf2" font-size="13">체감온도 19℃</text>
+          <text x="35" y="210" fill="#e8eaf2" font-size="13">
+            강수 10% / 풍속 3m/s
+          </text>
+          <text x="35" y="230" fill="#e8eaf2" font-size="13">PM2.5 보통</text>
+        </g>
+        <g transform="translate(350,95)">
+          <rect
+            x="0"
+            y="0"
+            rx="12"
+            ry="12"
+            width="80"
+            height="28"
+            fill="#2dbf82"
+          />
+          <text x="12" y="19" fill="#0b2a1f" font-size="13">Top</text>
+        </g>
+
+        <!-- ===== 화면 3: 중앙(추천 카드) ===== -->
+        <g transform="translate(600,110)" filter="url(#shadow)">
+          <rect
+            x="0"
+            y="0"
+            width="210"
+            height="470"
+            rx="22"
+            fill="#111624"
+            stroke="#2b3040"
+          />
+          <text x="30" y="40" fill="#e8eaf2" font-size="16">복장 추천</text>
+          <rect x="20" y="80" width="170" height="60" rx="12" fill="#0f8cff" />
+          <text x="32" y="115" fill="#fff" font-size="14">
+            얇은 자켓 + 긴바지
+          </text>
+          <rect
+            x="20"
+            y="160"
+            width="170"
+            height="40"
+            rx="12"
+            fill="#151a2a"
+            stroke="#2b3040"
+          />
+          <text x="32" y="185" fill="#e8eaf2" font-size="12">
+            아이템: 우산, 마스크
+          </text>
+        </g>
+        <g transform="translate(620,95)">
+          <rect
+            x="0"
+            y="0"
+            rx="12"
+            ry="12"
+            width="80"
+            height="28"
+            fill="#4e79ff"
+          />
+          <text x="12" y="19" fill="#fff" font-size="13">Middle</text>
+        </g>
+
+        <!-- ===== 화면 4: 하단(차트) ===== -->
+        <g transform="translate(870,110)" filter="url(#shadow)">
+          <rect
+            x="0"
+            y="0"
+            width="210"
+            height="470"
+            rx="22"
+            fill="#111624"
+            stroke="#2b3040"
+          />
+          <text x="35" y="40" fill="#e8eaf2" font-size="16">시간대별 차트</text>
+          <rect x="20" y="80" width="170" height="60" rx="8" fill="#2a3044" />
+          <text x="35" y="115" fill="#b8c0d4" font-size="13">기온</text>
+          <rect x="20" y="160" width="170" height="60" rx="8" fill="#2a3044" />
+          <text x="35" y="195" fill="#b8c0d4" font-size="13">PM2.5</text>
+          <rect x="20" y="240" width="170" height="60" rx="8" fill="#2a3044" />
+          <text x="35" y="275" fill="#b8c0d4" font-size="13">강수/풍속</text>
+        </g>
+        <g transform="translate(890,95)">
+          <rect
+            x="0"
+            y="0"
+            rx="12"
+            ry="12"
+            width="80"
+            height="28"
+            fill="#ff6b9d"
+          />
+          <text x="12" y="19" fill="#2c0a17" font-size="13">Bottom</text>
+        </g>
+
+        <!-- ===== 화면 5: 즐겨찾기 ===== -->
+        <g transform="translate(1140,110)" filter="url(#shadow)">
+          <rect
+            x="0"
+            y="0"
+            width="210"
+            height="470"
+            rx="22"
+            fill="#111624"
+            stroke="#2b3040"
+          />
+          <text x="55" y="40" fill="#e8eaf2" font-size="16">즐겨찾기</text>
+          <rect
+            x="20"
+            y="80"
+            width="170"
+            height="50"
+            rx="8"
+            fill="#151a2a"
+            stroke="#2b3040"
+          />
+          <text x="40" y="110" fill="#e8eaf2" font-size="12">서울 종로구</text>
+          <rect
+            x="20"
+            y="150"
+            width="170"
+            height="50"
+            rx="8"
+            fill="#151a2a"
+            stroke="#2b3040"
+          />
+          <text x="40" y="180" fill="#e8eaf2" font-size="12">부산 해운대</text>
+          <rect
+            x="20"
+            y="220"
+            width="170"
+            height="50"
+            rx="8"
+            fill="#151a2a"
+            stroke="#2b3040"
+          />
+          <text x="40" y="250" fill="#e8eaf2" font-size="12">제주 제주시</text>
+        </g>
+        <g transform="translate(1160,95)">
+          <rect
+            x="0"
+            y="0"
+            rx="12"
+            ry="12"
+            width="90"
+            height="28"
+            fill="#ffd166"
+          />
+          <text x="12" y="19" fill="#2d2402" font-size="13">Favorites</text>
+        </g>
+
+        <!-- 흐름 화살표 -->
+        <path
+          d="M 270 330 C 330 330, 300 210, 330 210"
+          stroke="#f0ad2c"
+          stroke-width="3"
+          fill="none"
+          marker-end="url(#arrow)"
+        />
+        <path
+          d="M 540 210 C 600 210, 580 210, 600 210"
+          stroke="#f0ad2c"
+          stroke-width="3"
+          fill="none"
+          marker-end="url(#arrow)"
+        />
+        <path
+          d="M 810 210 C 870 210, 850 210, 870 210"
+          stroke="#f0ad2c"
+          stroke-width="3"
+          fill="none"
+          marker-end="url(#arrow)"
+        />
+        <path
+          d="M 1080 210 C 1140 210, 1120 210, 1140 210"
+          stroke="#f0ad2c"
+          stroke-width="3"
+          fill="none"
+          marker-end="url(#arrow)"
+        />
+      </svg>
+    </div>
+  </body>
+</html>
