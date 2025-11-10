@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NutriFit 운동 추천</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <h1>운동 추천</h1>
+        <p class="muted">
+          목표 칼로리 대비 남은 에너지를 기반으로 운동 루틴을 추천합니다.
+          <a href="/">홈으로 돌아가기</a>
+        </p>
+        <div class="controls">
+          <label>
+            사용자 ID
+            <input id="user-id" type="text" value="{{ user_id }}" />
+          </label>
+          <label>
+            추천 분량(분)
+            <input id="minutes" type="number" min="10" max="90" value="{{ minutes }}" />
+          </label>
+          <button id="reload">추천 새로고침</button>
+        </div>
+      </header>
+
+      <section>
+        <h2>칼로리 갭 요약</h2>
+        <div id="summary" class="summary-cards">정보 없음</div>
+        <div id="workout-log-container" class="log-container">
+          <h3>오늘 기록한 운동</h3>
+          <div id="workout-log-list" class="list small">기록 없음</div>
+        </div>
+      </section>
+
+      <section>
+        <h2>운동 추천 목록</h2>
+        <div id="workout-message" class="muted small"></div>
+        <div id="workout-list" class="list">대기중...</div>
+      </section>
+    </div>
+
+    <script>
+      const apiKey = "{{ api_key }}";
+      const els = {
+        user: document.getElementById("user-id"),
+        minutes: document.getElementById("minutes"),
+        reload: document.getElementById("reload"),
+        summary: document.getElementById("summary"),
+        list: document.getElementById("workout-list"),
+        message: document.getElementById("workout-message"),
+        logs: document.getElementById("workout-log-list"),
+      };
+      let lastWorkouts = [];
+      let lastUserId = els.user.value.trim();
+      let lastMinutes = Number(els.minutes.value || 20);
+      let lastAssignedMinutes = 0;
+
+      const fetchJson = async (url, options = {}) => {
+        const headers = { "X-API-Key": apiKey, ...(options.headers || {}) };
+        const res = await fetch(url, { ...options, headers });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || res.statusText);
+        }
+        return res.json();
+      };
+
+      const formatSummary = (dash, workouts) => {
+        if (!dash) return '<p class="muted">데이터 없음</p>';
+        const assigned = workouts?.assigned_minutes ?? 0;
+        const requested = workouts?.requested_minutes ?? els.minutes.value;
+        return `
+          <div class="summary-grid">
+            <div class="summary-card emphasis">
+              <p class="label">남은 칼로리</p>
+              <p class="value">${Math.round(dash.remain?.kcal ?? 0)} kcal</p>
+              <p class="detail">요청 ${requested}분 · 추천 ${assigned}분</p>
+            </div>
+          </div>
+        `;
+      };
+
+      const categoryLabel = (cat) => {
+        const map = {
+          cardio: "유산소",
+          strength: "근력",
+          recovery: "회복",
+          lifestyle: "일상 생활",
+          stretch: "스트레칭",
+        };
+        return map[cat] || cat;
+      };
+      const setWorkoutMessage = (text, type = "muted") => {
+        els.message.textContent = text;
+        els.message.className = `${type} small`;
+      };
+      const renderWorkoutLogs = (items = []) => {
+        if (!items.length) {
+          els.logs.innerHTML = '<p class="muted small">기록 없음</p>';
+          return;
+        }
+        const limited = items.slice(0, 5);
+        const listHtml = limited
+          .map(
+            (item) => `
+            <div class="list-item compact" style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
+              <div>
+                <div class="title">${item.workout_name}</div>
+                <div class="meta">${Math.round(item.minutes ?? 0)}분 · ${Math.round(item.kcal_burn ?? 0)} kcal 소모</div>
+              </div>
+              <button class="delete-workout" data-id="${item.id}" style="margin-left:auto;">삭제</button>
+            </div>`
+          )
+          .join("");
+        const extra = items.length > 5 ? `<p class="muted small">+${items.length - 5}개 더 있음</p>` : "";
+        els.logs.innerHTML = listHtml + extra;
+      };
+
+      const loadWorkoutLogs = async (userId) => {
+        try {
+          const data = await fetchJson(`/api/workout-log/${userId}?today=1`);
+          renderWorkoutLogs(data.items || []);
+        } catch (error) {
+          els.logs.innerHTML = `<p class="muted small">기록 불러오기 실패: ${error.message}</p>`;
+        }
+      };
+
+      const deleteWorkoutLog = async (logId, userId) => {
+        try {
+          await fetchJson(`/api/workout-log/${logId}`, { method: "DELETE" });
+          await Promise.all([loadSummaryOnly(userId), loadWorkoutLogs(userId)]);
+        } catch (error) {
+          setWorkoutMessage(`삭제 실패: ${error.message}`, "error");
+        }
+      };
+
+      const formatWorkout = (items = []) => {
+        if (!items.length) return '<p class="muted">추천 데이터 없음</p>';
+        return items
+          .map(
+            (item) => `
+            <div class="list-item" style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
+              <div>
+                <div class="title">${item.name}</div>
+                <div class="meta">${categoryLabel(item.category)} · ${Math.round(item.mets ?? 0)} METs · ${Math.round(item.suggested_minutes ?? 0)}분</div>
+                <div class="detail">분당 ${((item.per_min_kcal ?? 0) || 0).toFixed(1)} kcal · 총 ${Math.round(item.total_kcal ?? 0)} kcal</div>
+              </div>
+              <button
+                class="add-workout"
+                data-name="${item.name}"
+                data-minutes="${item.suggested_minutes ?? 0}"
+                data-mets="${item.mets ?? 0}"
+                data-kcal="${item.total_kcal ?? 0}"
+              >기록하기</button>
+            </div>`
+          )
+          .join("");
+      };
+
+      const loadSummaryOnly = async (userId) => {
+        if (!userId) {
+          els.summary.innerHTML = '<p class="muted">사용자 ID를 입력하세요.</p>';
+          return;
+        }
+        els.summary.textContent = "불러오는 중...";
+        try {
+          const dash = await fetchJson(`/api/dashboard/${userId}`);
+          els.summary.innerHTML = formatSummary(dash, {
+            requested_minutes: lastMinutes,
+            assigned_minutes: lastAssignedMinutes,
+          });
+        } catch (error) {
+          els.summary.textContent = `에러: ${error.message}`;
+        }
+      };
+
+      const loadWorkoutRecommendations = async (userId) => {
+        if (!userId) {
+          els.list.innerHTML = '<p class="muted">사용자 ID를 입력하세요.</p>';
+          return;
+        }
+        els.list.textContent = "불러오는 중...";
+        try {
+          const minutes = Number(els.minutes.value || 20);
+          if (userId !== lastUserId || minutes !== lastMinutes) {
+            lastWorkouts = [];
+            lastUserId = userId;
+            lastMinutes = minutes;
+          }
+          const params = new URLSearchParams({ minutes });
+          lastWorkouts.forEach((name) => {
+            if (name) params.append("exclude", name);
+          });
+          const workouts = await fetchJson(`/api/recommend/workout/${userId}?${params.toString()}`);
+          els.list.innerHTML = formatWorkout(workouts.items);
+          setWorkoutMessage("");
+          lastWorkouts = (workouts.items || []).map((item) => item.name);
+          lastAssignedMinutes = workouts.assigned_minutes ?? 0;
+          await loadSummaryOnly(userId);
+        } catch (error) {
+          const message = `에러: ${error.message}`;
+          els.list.textContent = message;
+          setWorkoutMessage(message, "error");
+        }
+      };
+
+      const addWorkoutLog = async (payload) => {
+        setWorkoutMessage("기록 중...");
+        try {
+          await fetchJson(`/api/workout-log`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          setWorkoutMessage("기록 완료!");
+          await Promise.all([loadSummaryOnly(payload.user_id), loadWorkoutLogs(payload.user_id)]);
+        } catch (error) {
+          setWorkoutMessage(`기록 실패: ${error.message}`, "error");
+        }
+      };
+
+      const reloadAll = async () => {
+        const userId = els.user.value.trim();
+        await Promise.all([
+          loadWorkoutRecommendations(userId),
+          userId ? loadWorkoutLogs(userId) : Promise.resolve(),
+        ]);
+      };
+      els.reload.addEventListener("click", reloadAll);
+      els.list.addEventListener("click", (event) => {
+        if (!event.target.classList.contains("add-workout")) return;
+        const userId = els.user.value.trim();
+        if (!userId) {
+          setWorkoutMessage("사용자 ID를 입력하세요.", "error");
+          return;
+        }
+        const btn = event.target;
+        const payload = {
+          user_id: userId,
+          workout_name: btn.dataset.name,
+          minutes: Number(btn.dataset.minutes) || 0,
+          mets: Number(btn.dataset.mets) || 0,
+          kcal_burn: Number(btn.dataset.kcal) || 0,
+        };
+        addWorkoutLog(payload);
+      });
+      els.logs.addEventListener("click", (event) => {
+        if (!event.target.classList.contains("delete-workout")) return;
+        const logId = event.target.dataset.id;
+        const userId = els.user.value.trim();
+        if (!logId || !userId) return;
+        deleteWorkoutLog(logId, userId);
+      });
+      reloadAll();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NutriFit 식단 추천</title>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='style.css') }}"
+    />
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <h1>식단 추천</h1>
+        <p class="muted">
+          사용자 ID별 남은 영양 밸런스를 기반으로 추천합니다.
+          <a href="/">홈으로 돌아가기</a>
+        </p>
+        <div class="controls">
+          <label>
+            사용자 ID
+            <input id="user-id" type="text" value="{{ user_id }}" />
+          </label>
+          <button id="reload">추천 새로고침</button>
+        </div>
+      </header>
+
+      <section>
+        <h2>남은 영양 밸런스</h2>
+        <div id="summary" class="summary-cards">정보 없음</div>
+        <div id="food-log-container" class="log-container">
+          <h3>오늘 기록한 식단</h3>
+          <div id="food-log-list" class="list small">기록 없음</div>
+        </div>
+      </section>
+
+      <section>
+        <h2>식단 추천 목록 (100g)</h2>
+        <div id="food-message" class="muted small"></div>
+        <div id="food-list" class="list">대기중...</div>
+      </section>
+    </div>
+
+    <script>
+      const apiKey = "{{ api_key }}";
+      const els = {
+        user: document.getElementById("user-id"),
+        reload: document.getElementById("reload"),
+        summary: document.getElementById("summary"),
+        food: document.getElementById("food-list"),
+        foodMessage: document.getElementById("food-message"),
+        foodLogs: document.getElementById("food-log-list"),
+      };
+      let lastItems = [];
+      let lastUserId = els.user.value.trim();
+
+      const fetchJson = async (url, options = {}) => {
+        const headers = { "X-API-Key": apiKey, ...(options.headers || {}) };
+        const res = await fetch(url, { ...options, headers });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || res.statusText);
+        }
+        return res.json();
+      };
+
+      const formatSummary = (dash) => {
+        if (!dash) return '<p class="muted">데이터 없음</p>';
+        return `
+          <div class="summary-grid">
+            <div class="summary-card">
+              <p class="label">목표 칼로리</p>
+              <p class="value">${Math.round(dash.target?.kcal ?? 0)} kcal</p>
+            </div>
+            <div class="summary-card">
+              <p class="label">남은 칼로리</p>
+              <p class="value">${Math.round(dash.remain?.kcal ?? 0)} kcal</p>
+              <p class="detail">단백질 ${Math.round(dash.remain?.protein_g ?? 0)}g · 지방 ${Math.round(dash.remain?.fat_g ?? 0)}g · 탄수 ${Math.round(dash.remain?.carb_g ?? 0)}g</p>
+            </div>
+          </div>
+        `;
+      };
+
+      const FOOD_TYPE_LABELS = {
+        natural: "일반식",
+        processed: "가공식품",
+      };
+      const setFoodMessage = (text, type = "muted") => {
+        els.foodMessage.textContent = text;
+        els.foodMessage.className = `${type} small`;
+      };
+      const renderFoodLogs = (items = []) => {
+        if (!items.length) {
+          els.foodLogs.innerHTML = '<p class="muted small">기록 없음</p>';
+          return;
+        }
+        const limited = items.slice(0, 5);
+        const listHtml = limited
+          .map(
+            (item) => `
+            <div class="list-item compact" style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
+              <div>
+                <div class="title">${item.food_name}</div>
+                <div class="meta">${Math.round(item.kcal ?? 0)} kcal · 단백질 ${Math.round(item.protein_g ?? 0)}g · 지방 ${Math.round(item.fat_g ?? 0)}g · 탄수 ${Math.round(item.carb_g ?? 0)}g</div>
+              </div>
+              <button class="delete-food" data-id="${item.id}" style="margin-left:auto;">삭제</button>
+            </div>`
+          )
+          .join("");
+        const extra = items.length > 5 ? `<p class="muted small">+${items.length - 5}개 더 있음</p>` : "";
+        els.foodLogs.innerHTML = listHtml + extra;
+      };
+
+      const loadFoodLogs = async (userId) => {
+        try {
+          const data = await fetchJson(`/api/food-log/${userId}?today=1`);
+          renderFoodLogs(data.items || []);
+        } catch (error) {
+          els.foodLogs.innerHTML = `<p class="muted small">기록 불러오기 실패: ${error.message}</p>`;
+        }
+      };
+
+      const deleteFoodLog = async (logId, userId) => {
+        try {
+          await fetchJson(`/api/food-log/${logId}`, { method: "DELETE" });
+          await Promise.all([loadSummaryOnly(userId), loadFoodLogs(userId)]);
+        } catch (error) {
+          setFoodMessage(`삭제 실패: ${error.message}`, "error");
+        }
+      };
+
+      const formatFood = (payload = {}) => {
+        const meals = payload.meals || [];
+        if (!meals.length) return '<p class="muted">추천 데이터 없음</p>';
+        return meals
+          .map((meal) => {
+            const target = meal.targets || {};
+            const targetLine = `권장 ${Math.round(target.kcal ?? 0)} kcal · 단백질 ${Math.round(target.protein_g ?? 0)}g · 지방 ${Math.round(target.fat_g ?? 0)}g · 탄수 ${Math.round(target.carb_g ?? 0)}g`;
+            const items = (meal.items || [])
+              .map((item) => {
+                const typeLabel = FOOD_TYPE_LABELS[item.food_type] || "기타";
+                const macroLine = `[${typeLabel}] ${Math.round(item.kcal ?? 0)} kcal · 단백질 ${Math.round(item.protein_g ?? 0)}g · 지방 ${Math.round(item.fat_g ?? 0)}g · 탄수 ${Math.round(item.carb_g ?? 0)}g`;
+                return `
+                <div class="list-item" style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
+                  <div>
+                    <div class="title">${item.name}</div>
+                    <div class="meta">${macroLine}</div>
+                  </div>
+                  <button
+                    class="add-food"
+                    data-name="${item.name}"
+                    data-kcal="${item.kcal ?? 0}"
+                    data-protein="${item.protein_g ?? 0}"
+                    data-fat="${item.fat_g ?? 0}"
+                    data-carb="${item.carb_g ?? 0}"
+                  >
+                    추가하기
+                  </button>
+                </div>`;
+              })
+              .join("");
+            return `
+              <div class="meal-block">
+                <div class="meal-header">
+                  <h3>${meal.label || meal.key}</h3>
+                  <p class="muted small">${targetLine}</p>
+                </div>
+                ${items || '<p class="muted">추천 없음</p>'}
+              </div>
+            `;
+          })
+          .join("");
+      };
+
+      const loadSummaryOnly = async (userId) => {
+        if (!userId) {
+          els.summary.innerHTML = '<p class="muted">사용자 ID를 입력하세요.</p>';
+          return;
+        }
+        els.summary.textContent = "불러오는 중...";
+        try {
+          const dash = await fetchJson(`/api/dashboard/${userId}`);
+          els.summary.innerHTML = formatSummary(dash);
+        } catch (error) {
+          els.summary.textContent = `에러: ${error.message}`;
+        }
+      };
+
+      const loadFoodRecommendations = async (userId) => {
+        if (!userId) {
+          els.food.innerHTML = '<p class="muted">사용자 ID를 입력하세요.</p>';
+          return;
+        }
+        els.food.textContent = "불러오는 중...";
+        try {
+          if (userId !== lastUserId) {
+            lastItems = [];
+            lastUserId = userId;
+          }
+          const params = new URLSearchParams();
+          lastItems.forEach((name) => {
+            if (name) {
+              params.append("exclude", name);
+            }
+          });
+          const recommendUrl = `/api/recommend/food/${userId}${params.toString() ? `?${params.toString()}` : ""}`;
+          const foods = await fetchJson(recommendUrl);
+          els.food.innerHTML = formatFood(foods);
+          setFoodMessage("");
+          lastItems = (foods.items || []).map((item) => item.name);
+        } catch (error) {
+          const message = `에러: ${error.message}`;
+          els.food.textContent = message;
+          setFoodMessage(message, "error");
+        }
+      };
+
+      const addFoodLog = async (payload) => {
+        setFoodMessage("기록 중...");
+        try {
+          await fetchJson(`/api/food-log`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          setFoodMessage("기록 완료!");
+          await Promise.all([
+            loadSummaryOnly(payload.user_id),
+            loadFoodLogs(payload.user_id),
+          ]);
+        } catch (error) {
+          setFoodMessage(`기록 실패: ${error.message}`, "error");
+        }
+      };
+
+      const reloadAll = async () => {
+        const userId = els.user.value.trim();
+        await Promise.all([
+          loadSummaryOnly(userId),
+          loadFoodRecommendations(userId),
+          userId ? loadFoodLogs(userId) : Promise.resolve(),
+        ]);
+      };
+      els.reload.addEventListener("click", reloadAll);
+      els.food.addEventListener("click", (event) => {
+        if (!event.target.classList.contains("add-food")) return;
+        const userId = els.user.value.trim();
+        if (!userId) {
+          setFoodMessage("사용자 ID를 입력하세요.", "error");
+          return;
+        }
+        const target = event.target;
+        const payload = {
+          user_id: userId,
+          food_name: target.dataset.name,
+          kcal: Number(target.dataset.kcal) || 0,
+          protein_g: Number(target.dataset.protein) || 0,
+          fat_g: Number(target.dataset.fat) || 0,
+          carb_g: Number(target.dataset.carb) || 0,
+        };
+        addFoodLog(payload);
+      });
+      els.foodLogs.addEventListener("click", (event) => {
+        if (!event.target.classList.contains("delete-food")) return;
+        const logId = event.target.dataset.id;
+        const userId = els.user.value.trim();
+        if (!logId || !userId) return;
+        deleteFoodLog(logId, userId);
+      });
+      reloadAll();
+    </script>
+  </body>
+</html>

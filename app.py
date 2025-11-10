@@ -1,10 +1,6 @@
-from flask import Flask, render_template
+from nutrifit import create_app
 
-app = Flask(__name__)
-
-@app.route("/hw1")
-def hw1():
-    return render_template("hw1.html")
+app = create_app()
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5050, debug=True)
+    app.run(host="127.0.0.1", port=5050, debug=True)

@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NutriFit 주간 리포트</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <h1>주간 리포트</h1>
+        <p class="muted">
+          최근 7일 동안의 섭취·운동 추세와 목표 달성률을 확인하세요.
+          <a href="/">홈으로 돌아가기</a>
+        </p>
+        <div class="controls">
+          <label>
+            사용자 ID
+            <input id="user-id" type="text" value="{{ user_id }}" />
+          </label>
+          <label>
+            기간(일)
+            <input id="days" type="number" min="7" max="60" value="30" />
+          </label>
+          <button id="reload">리포트 새로고침</button>
+        </div>
+      </header>
+
+      <section>
+        <h2>요약</h2>
+        <div id="summary" class="summary-cards">대기중...</div>
+      </section>
+
+      <section>
+        <h2>7일 추세</h2>
+        <div class="report-table">
+          <div class="report-row report-head">
+            <span>날짜</span>
+            <span>섭취 kcal</span>
+            <span>운동 kcal</span>
+            <span>칼로리 갭</span>
+          </div>
+          <div id="trend-list">데이터 없음</div>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      const apiKey = "{{ api_key }}";
+      const els = {
+        user: document.getElementById("user-id"),
+        days: document.getElementById("days"),
+        reload: document.getElementById("reload"),
+        summary: document.getElementById("summary"),
+        trend: document.getElementById("trend-list"),
+      };
+
+      const fetchJson = async (url) => {
+        const res = await fetch(url, { headers: { "X-API-Key": apiKey } });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || res.statusText);
+        }
+        return res.json();
+      };
+
+      const formatSummary = (data) => {
+        const summary = data.summary || {};
+        return `
+          <div class="summary-grid">
+            <div class="summary-card">
+              <p class="label">평균 섭취</p>
+              <p class="value">${Math.round(summary.avg_eat ?? 0)} kcal</p>
+            </div>
+            <div class="summary-card">
+              <p class="label">평균 운동</p>
+              <p class="value">${Math.round(summary.avg_burn ?? 0)} kcal</p>
+            </div>
+            <div class="summary-card">
+              <p class="label">최고/최저 섭취</p>
+              <p class="value">${Math.round(summary.max_eat ?? 0)} / ${Math.round(summary.min_eat ?? 0)} kcal</p>
+            </div>
+            <div class="summary-card emphasis">
+              <p class="label">목표 달성률</p>
+              <p class="value">${summary.compliance ?? 0}%</p>
+            </div>
+          </div>
+        `;
+      };
+
+      const formatTrend = (days = []) => {
+        if (!days.length) return '<p class="muted">데이터 없음</p>';
+        return days
+          .map(
+            (day) => `
+            <div class="report-row">
+              <span>${day.date}</span>
+              <span>${day.eat}</span>
+              <span>${day.burn}</span>
+              <span class="${day.gap >= 0 ? 'positive' : 'negative'}">${day.gap}</span>
+            </div>`
+          )
+          .join("");
+      };
+
+      const loadReports = async () => {
+        const userId = els.user.value.trim();
+        if (!userId) {
+          els.summary.innerHTML = '<p class="muted">사용자 ID를 입력하세요.</p>';
+          return;
+        }
+        els.summary.textContent = "불러오는 중...";
+        els.trend.textContent = "불러오는 중...";
+        try {
+          const days = els.days.value || 30;
+          const data = await fetchJson(`/api/reports/${userId}?days=${days}`);
+          els.summary.innerHTML = formatSummary(data);
+          els.trend.innerHTML = formatTrend(data.days);
+        } catch (error) {
+          const message = `에러: ${error.message}`;
+          els.summary.textContent = message;
+          els.trend.textContent = message;
+        }
+      };
+
+      els.reload.addEventListener("click", loadReports);
+      loadReports();
+    </script>
+  </body>
+</html>

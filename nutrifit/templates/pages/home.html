@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NutriFit 홈</title>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='style.css') }}"
+    />
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <h1>NutriFit 홈</h1>
+        <p class="muted">사용자 정보를 입력하고 하루 요약을 확인하세요.</p>
+      </header>
+
+      <section class="profile-section">
+        <div class="profile-header">
+          <div>
+            <h2>사용자 프로필</h2>
+            <p class="muted small">
+              기본 정보를 입력하면 NutriFit이 목표별 요약과 추천을 준비합니다.
+            </p>
+          </div>
+          <ul class="profile-hints">
+            <li>✅ 사용자 ID는 고유 닉네임으로 유지</li>
+            <li>✅ 활동 수준은 평소 한 주 평균을 기준으로 선택</li>
+            <li>✅ 목표 칼로리는 비워두면 시스템이 자동 계산</li>
+          </ul>
+        </div>
+
+        <div class="profile-card">
+          <div class="profile-group">
+            <h3>기본 정보</h3>
+            <div class="profile-grid">
+              <label>
+                사용자 ID
+                <input
+                  id="user-id"
+                  type="text"
+                  value="{{ user_id }}"
+                  placeholder="예: user01"
+                />
+              </label>
+              <label>
+                이름
+                <input id="name" type="text" placeholder="홍길동" />
+              </label>
+              <label>
+                성별
+                <select id="sex">
+                  <option value="">선택</option>
+                  <option value="female">여성</option>
+                  <option value="male">남성</option>
+                </select>
+              </label>
+              <label>
+                나이
+                <input id="age" type="number" min="10" max="90" />
+              </label>
+              <label>
+                키(cm)
+                <input id="height_cm" type="number" min="120" max="220" />
+              </label>
+              <label>
+                몸무게(kg)
+                <input
+                  id="weight_kg"
+                  type="number"
+                  min="35"
+                  max="2000"
+                  step="0.1"
+                />
+              </label>
+            </div>
+          </div>
+
+          <div class="profile-group">
+            <h3>목표 & 활동</h3>
+            <div class="profile-grid">
+              <label>
+                활동 수준
+                <select id="activity_level">
+                  <option value="">선택</option>
+                  <option value="low">저활동</option>
+                  <option value="moderate">중간 활동</option>
+                  <option value="high">고활동</option>
+                </select>
+              </label>
+              <label>
+                목표 유형
+                <select id="goal_type">
+                  <option value="">선택</option>
+                  <option value="cut">감량</option>
+                  <option value="balance">유지</option>
+                  <option value="gain_muscle">근육 증가</option>
+                </select>
+              </label>
+              <label>
+                목표 칼로리
+                <input id="goal_kcal" type="number" min="1200" max="3500" />
+              </label>
+              <label>
+                운동 추천 분
+                <input
+                  id="minutes"
+                  type="number"
+                  value="0"
+                  min="10"
+                  max="300"
+                />
+              </label>
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <button id="load-profile" class="ghost">프로필 불러오기</button>
+            <button id="save-profile">프로필 저장</button>
+            <button id="auto-target" class="ghost">추천 목표 계산</button>
+          </div>
+          <div id="profile-message" class="muted small"></div>
+
+          <div class="profile-group">
+            <h3>저장된 프로필</h3>
+            <div class="profile-grid profile-select-row">
+              <label class="profile-select">
+                프로필 선택
+                <select id="profile-list">
+                  <option value="">저장된 프로필이 없습니다</option>
+                </select>
+              </label>
+              <button id="delete-profile" class="ghost profile-select__button">
+                삭제
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>하루 요약</h2>
+        <div id="dashboard-summary" class="summary-cards">대기중...</div>
+        <div class="actions-row">
+          <a id="meal-link" class="cta-button" href="/meal"
+            >식단 추천 확인하기</a
+          >
+          <a id="workout-link" class="cta-button secondary" href="/workout"
+            >운동 추천 확인하기</a
+          >
+          <a class="cta-button ghost" href="/reports">주간 리포트 보기</a>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      const apiKey = "{{ api_key }}";
+      const els = {
+        user: document.getElementById("user-id"),
+        name: document.getElementById("name"),
+        sex: document.getElementById("sex"),
+        age: document.getElementById("age"),
+        height: document.getElementById("height_cm"),
+        weight: document.getElementById("weight_kg"),
+        activity: document.getElementById("activity_level"),
+        goalType: document.getElementById("goal_type"),
+        goalKcal: document.getElementById("goal_kcal"),
+        minutes: document.getElementById("minutes"),
+        saveProfile: document.getElementById("save-profile"),
+        loadProfile: document.getElementById("load-profile"),
+        autoTarget: document.getElementById("auto-target"),
+        profileMessage: document.getElementById("profile-message"),
+        dash: document.getElementById("dashboard-summary"),
+        profileList: document.getElementById("profile-list"),
+        mealLink: document.getElementById("meal-link"),
+        workoutLink: document.getElementById("workout-link"),
+        deleteProfile: document.getElementById("delete-profile"),
+      };
+
+      const fetchJson = async (url, options = {}) => {
+        const headers = { "X-API-Key": apiKey, ...(options.headers || {}) };
+        const res = await fetch(url, { ...options, headers });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || res.statusText);
+        }
+        return res.json();
+      };
+
+      const setMessage = (text, type = "muted") => {
+        els.profileMessage.textContent = text;
+        els.profileMessage.className = `${type} small`;
+      };
+
+      let lastDashboardSignature = null;
+      let lastDashboardUserId = null;
+
+      const collectProfile = () => ({
+        user_id: els.user.value.trim(),
+        name: els.name.value.trim() || undefined,
+        sex: els.sex.value || undefined,
+        age: els.age.value ? Number(els.age.value) : undefined,
+        height_cm: els.height.value ? Number(els.height.value) : undefined,
+        weight_kg: els.weight.value ? Number(els.weight.value) : undefined,
+        activity_level: els.activity.value || undefined,
+        goal_type: els.goalType.value || undefined,
+        goal_kcal: els.goalKcal.value ? Number(els.goalKcal.value) : undefined,
+      });
+
+      const formatDashboard = (data) => {
+        if (!data) return '<p class="muted">데이터 없음</p>';
+        const remain = data.remain || {};
+        const eaten = data.eaten || {};
+        const target = data.target || {};
+        const burn = data.burn || 0;
+        return `
+          <div class="summary-grid">
+            <div class="summary-card">
+              <p class="label">목표 칼로리</p>
+              <p class="value">${Math.round(target.kcal ?? 0)} kcal</p>
+            </div>
+            <div class="summary-card">
+              <p class="label">오늘 섭취</p>
+              <p class="value">${Math.round(eaten.kcal ?? 0)} kcal</p>
+              <p class="detail">단백질 ${Math.round(eaten.protein_g ?? 0)}g · 지방 ${Math.round(eaten.fat_g ?? 0)}g · 탄수 ${Math.round(eaten.carb_g ?? 0)}g</p>
+            </div>
+            <div class="summary-card">
+              <p class="label">운동 소모</p>
+              <p class="value">${Math.round(burn ?? 0)} kcal</p>
+            </div>
+            <div class="summary-card emphasis">
+              <p class="label">남은 에너지</p>
+              <p class="value">${Math.round(remain.kcal ?? 0)} kcal</p>
+              <p class="detail">단백질 ${Math.round(remain.protein_g ?? 0)}g · 지방 ${Math.round(remain.fat_g ?? 0)}g · 탄수 ${Math.round(remain.carb_g ?? 0)}g</p>
+            </div>
+          </div>
+        `;
+      };
+
+      const loadSummary = async (force = false) => {
+        const userId = els.user.value.trim();
+        if (!userId) {
+          els.dash.innerHTML = '<p class="muted">사용자 ID를 입력하세요.</p>';
+          return;
+        }
+        if (lastDashboardUserId !== userId) {
+          lastDashboardUserId = userId;
+          lastDashboardSignature = null;
+          force = true;
+        }
+        els.dash.textContent = "불러오는 중...";
+        try {
+          const dash = await fetchJson(`/api/dashboard/${userId}`);
+          const signature = JSON.stringify(dash);
+          if (force || signature !== lastDashboardSignature) {
+            lastDashboardSignature = signature;
+            els.dash.innerHTML = formatDashboard(dash);
+          }
+        } catch (error) {
+          els.dash.textContent = `에러: ${error.message}`;
+        }
+      };
+
+      const renderProfileList = (items = []) => {
+        const options = [
+          '<option value="">저장된 프로필을 선택하세요</option>',
+        ];
+        items.forEach((item) => {
+          const label = item.name
+            ? `${item.user_id} (${item.name})`
+            : item.user_id;
+          options.push(`<option value="${item.user_id}">${label}</option>`);
+        });
+        els.profileList.innerHTML = options.join("");
+        const currentId = els.user.value.trim();
+        if (currentId) {
+          els.profileList.value = currentId;
+        }
+      };
+
+      const loadProfileList = async () => {
+        try {
+          const data = await fetchJson(`/api/profile`);
+          renderProfileList(data.items || []);
+        } catch (error) {
+          console.error("프로필 목록 불러오기 실패", error);
+        }
+      };
+
+      const saveProfile = async () => {
+        try {
+          const payload = collectProfile();
+          if (!payload.user_id) {
+            setMessage("사용자 ID는 필수입니다.", "error");
+            return;
+          }
+          await fetchJson(`/api/profile`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          setMessage("프로필 저장 완료!");
+          await loadProfileList();
+          els.profileList.value = payload.user_id;
+          await loadSummary(true);
+        } catch (error) {
+          setMessage(`프로필 저장 실패: ${error.message}`, "error");
+        }
+      };
+
+      const fetchProfile = async () => {
+        try {
+          const userId = els.user.value.trim();
+          if (!userId) {
+            setMessage("사용자 ID를 입력하세요.", "error");
+            return;
+          }
+          const data = await fetchJson(`/api/profile/${userId}`);
+          els.name.value = data.name || "";
+          els.sex.value = data.sex || "";
+          els.age.value = data.age ?? "";
+          els.height.value = data.height_cm ?? "";
+          els.weight.value = data.weight_kg ?? "";
+          els.activity.value = data.activity_level || "";
+          els.goalType.value = data.goal_type || "";
+          els.goalKcal.value = data.goal_kcal ?? "";
+          if (els.profileList.options.length) {
+            els.profileList.value = userId;
+          }
+          setMessage("프로필 불러오기 완료");
+          await loadSummary(true);
+        } catch (error) {
+          setMessage(`프로필 불러오기 실패: ${error.message}`, "error");
+        }
+      };
+
+      const applyAutoTarget = async () => {
+        try {
+          const payload = collectProfile();
+          const required = ["sex", "age", "height_cm", "weight_kg"];
+          const missing = required.filter((key) => !payload[key]);
+          if (missing.length) {
+            setMessage("성별/나이/키/몸무게를 모두 입력하세요.", "error");
+            return;
+          }
+          const requestPayload = {
+            ...payload,
+            exercise_minutes: els.minutes.value ? Number(els.minutes.value) : 0,
+          };
+          const result = await fetchJson(`/api/profile/auto-target`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(requestPayload),
+          });
+          els.goalKcal.value = Math.round(result.goal_kcal);
+          setMessage(
+            `추천 목표: ${Math.round(result.goal_kcal)} kcal (단백질 ${Math.round(result.protein_g)}g / 지방 ${Math.round(result.fat_g)}g / 탄수 ${Math.round(result.carb_g)}g)`,
+            "muted"
+          );
+        } catch (error) {
+          setMessage(`추천 목표 계산 실패: ${error.message}`, "error");
+        }
+      };
+
+      const deleteProfileHandler = async () => {
+        const userId = els.profileList.value || els.user.value.trim();
+        if (!userId) {
+          setMessage("삭제할 사용자 ID를 선택하세요.", "error");
+          return;
+        }
+        if (!confirm(`${userId} 프로필을 삭제할까요?`)) {
+          return;
+        }
+        try {
+          await fetchJson(`/api/profile/${userId}`, { method: "DELETE" });
+          setMessage("프로필 삭제 완료");
+          await loadProfileList();
+          if (els.user.value.trim() === userId) {
+            els.user.value = "";
+            els.name.value = "";
+            els.sex.value = "";
+            els.age.value = "";
+            els.height.value = "";
+            els.weight.value = "";
+            els.activity.value = "";
+            els.goalType.value = "";
+            els.goalKcal.value = "";
+            await loadSummary(true);
+          }
+        } catch (error) {
+          setMessage(`삭제 실패: ${error.message}`, "error");
+        }
+      };
+
+      els.saveProfile.addEventListener("click", saveProfile);
+      els.loadProfile.addEventListener("click", fetchProfile);
+      els.autoTarget.addEventListener("click", applyAutoTarget);
+      els.deleteProfile.addEventListener("click", deleteProfileHandler);
+      els.profileList.addEventListener("change", () => {
+        const selected = els.profileList.value;
+        if (!selected) {
+          return;
+        }
+        els.user.value = selected;
+        fetchProfile();
+      });
+      els.user.addEventListener("change", () => {
+        lastDashboardUserId = null;
+        loadSummary(true);
+      });
+      const openWithState = (baseUrl, extraParams = {}) => {
+        const userId = els.user.value.trim() || "demo";
+        const params = new URLSearchParams({ user_id: userId, ...extraParams });
+        sessionStorage.setItem("nutrifit:lastUserId", userId);
+        sessionStorage.setItem("nutrifit:lastDate", new Date().toISOString());
+        window.location.href = `${baseUrl}?${params.toString()}`;
+      };
+
+      const checkAndRefreshDashboard = async () => {
+        const storedId = sessionStorage.getItem("nutrifit:lastUserId");
+        const storedDate = sessionStorage.getItem("nutrifit:lastDate");
+        const currentId = els.user.value.trim() || "demo";
+        const today = new Date().toISOString().slice(0, 10);
+        if (
+          storedId &&
+          storedDate &&
+          storedId === currentId &&
+          storedDate.slice(0, 10) === today
+        ) {
+          await loadSummary(true);
+          sessionStorage.removeItem("nutrifit:lastUserId");
+          sessionStorage.removeItem("nutrifit:lastDate");
+        }
+      };
+
+      els.mealLink.addEventListener("click", (event) => {
+        event.preventDefault();
+        openWithState("/meal");
+      });
+      els.workoutLink.addEventListener("click", (event) => {
+        event.preventDefault();
+        const minutes = els.minutes.value || 20;
+        openWithState("/workout", { minutes });
+      });
+      const handlePageShow = (event) => {
+        if (
+          event.persisted ||
+          performance.getEntriesByType("navigation")[0]?.type === "back_forward"
+        ) {
+          checkAndRefreshDashboard();
+        }
+      };
+
+      window.addEventListener("pageshow", handlePageShow);
+
+      loadProfileList();
+      loadSummary(true).then(checkAndRefreshDashboard);
+    </script>
+  </body>
+</html>
