@@ -7,3 +7,5 @@ marshmallow-sqlalchemy==1.0.0
 pandas==2.2.2
 openpyxl==3.1.2
 requests==2.32.3
+Flask-Login==0.6.3
+google-generativeai>=0.8.0

@@ -1,4 +1,5 @@
 from flask import jsonify, request
+from flask_login import current_user
 
 from .. import db
 from ..models import UserProfile
@@ -9,16 +10,17 @@ from . import api_bp
 @api_bp.post("/profile")
 def upsert_profile():
     payload = request.get_json(force=True) or {}
-    user_id = payload.get("user_id")
-    if not user_id:
-        return jsonify({"error": "user_id is required"}), 400
-
+    # Force user_id to be current_user
+    user_id = current_user.id
+    
     profile = UserProfile.query.get(user_id)
     if profile:
         for key, value in payload.items():
-            if hasattr(profile, key):
+            if hasattr(profile, key) and key != "user_id":
                 setattr(profile, key, value)
     else:
+        # Should not happen often as we create profile on register, but safe to have
+        payload["user_id"] = user_id
         profile = UserProfile(**payload)
         db.session.add(profile)
 
@@ -26,27 +28,24 @@ def upsert_profile():
     return jsonify({"ok": True, "profile": profile.as_dict()})
 
 
-@api_bp.get("/profile")
-def list_profiles():
-    profiles = (
-        UserProfile.query.order_by(UserProfile.user_id.asc()).all()
-    )
-    items = [
-        {"user_id": profile.user_id, "name": profile.name}
-        for profile in profiles
-    ]
-    return jsonify({"items": items})
+# list_profiles removed for security
 
 
 @api_bp.get("/profile/<user_id>")
 def get_profile(user_id):
+    if user_id != current_user.id:
+        return jsonify({"error": "unauthorized"}), 403
     profile = UserProfile.query.get_or_404(user_id)
     return jsonify(profile.as_dict())
 
 
 @api_bp.delete("/profile/<user_id>")
 def delete_profile(user_id):
+    if user_id != current_user.id:
+        return jsonify({"error": "unauthorized"}), 403
     profile = UserProfile.query.get_or_404(user_id)
+    # Note: Deleting profile might break foreign keys if not cascaded.
+    # For now, we just delete the profile data.
     db.session.delete(profile)
     db.session.commit()
     return jsonify({"ok": True})

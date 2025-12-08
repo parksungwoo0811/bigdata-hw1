@@ -21,7 +21,7 @@
           </label>
           <label>
             기간(일)
-            <input id="days" type="number" min="7" max="60" value="30" />
+            <input id="days" type="number" min="1" max="60" value="7" />
           </label>
           <button id="reload">리포트 새로고침</button>
         </div>
@@ -33,7 +33,12 @@
       </section>
 
       <section>
-        <h2>7일 추세</h2>
+        <h2 id="trend-header">{{ days }}일 추세</h2>
+        <!-- Chart Canvas -->
+        <div class="chart-container" style="position: relative; height: 320px; width: 100%; margin-bottom: 24px;">
+          <canvas id="trendChart"></canvas>
+        </div>
+
         <div class="report-table">
           <div class="report-row report-head">
             <span>날짜</span>
@@ -46,14 +51,20 @@
       </section>
     </div>
 
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
       const apiKey = "{{ api_key }}";
+      let chartInstance = null;
+
       const els = {
         user: document.getElementById("user-id"),
         days: document.getElementById("days"),
         reload: document.getElementById("reload"),
         summary: document.getElementById("summary"),
+        summary: document.getElementById("summary"),
         trend: document.getElementById("trend-list"),
+        trendHeader: document.getElementById("trend-header"),
       };
 
       const fetchJson = async (url) => {
@@ -96,12 +107,98 @@
             (day) => `
             <div class="report-row">
               <span>${day.date}</span>
-              <span>${day.eat}</span>
-              <span>${day.burn}</span>
-              <span class="${day.gap >= 0 ? 'positive' : 'negative'}">${day.gap}</span>
+              <span>${day.eaten}</span> <!-- Fixed from day.eat -->
+              <span>${day.burned}</span> <!-- Fixed from day.burn -->
+              <span class="${day.net >= 0 ? 'positive' : 'negative'}">${day.net}</span>
             </div>`
           )
           .join("");
+      };
+
+      const renderChart = (days) => {
+        const ctx = document.getElementById('trendChart').getContext('2d');
+        
+        // Show Oldest -> Newest (Standard Time Series)
+        // API returns Oldest first, so we use it as is.
+        const sortedDays = [...days];
+        
+        const labels = sortedDays.map(d => d.date.slice(5)); // 'MM-DD'
+        const eaten = sortedDays.map(d => d.eaten);
+        const burned = sortedDays.map(d => d.burned);
+        const net = sortedDays.map(d => d.net);
+        const targets = sortedDays.map(d => d.target);
+
+        if (chartInstance) {
+          chartInstance.destroy();
+        }
+
+        chartInstance = new Chart(ctx, {
+          data: {
+            labels: labels,
+            datasets: [
+              {
+                type: 'line',
+                label: '목표 (Target)',
+                data: targets,
+                borderColor: '#4A8478', // Sage Primary
+                borderWidth: 2,
+                borderDash: [5, 5],
+                pointRadius: 0,
+                fill: false,
+                tension: 0
+              },
+              {
+                type: 'bar',
+                label: '섭취 (Eaten)',
+                data: eaten,
+                backgroundColor: 'rgba(74, 132, 120, 0.7)', // Sage
+                order: 2
+              },
+              {
+                type: 'bar',
+                label: '운동 (Burned)',
+                data: burned,
+                backgroundColor: 'rgba(239, 68, 68, 0.7)', // Red
+                order: 3
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+              mode: 'index',
+              intersect: false,
+            },
+            plugins: {
+              legend: {
+                position: 'bottom'
+              },
+              tooltip: {
+                callbacks: {
+                  footer: (items) => {
+                    const idx = items[0].dataIndex;
+                    const netVal = net[idx];
+                    return `Gap: ${netVal} kcal`;
+                  }
+                }
+              }
+            },
+            scales: {
+              y: {
+                beginAtZero: true,
+                grid: {
+                  borderDash: [2, 2]
+                }
+              },
+              x: {
+                grid: {
+                  display: false
+                }
+              }
+            }
+          }
+        });
       };
 
       const loadReports = async () => {
@@ -115,8 +212,13 @@
         try {
           const days = els.days.value || 30;
           const data = await fetchJson(`/api/reports/${userId}?days=${days}`);
+          if (els.trendHeader) els.trendHeader.textContent = `${days}일 추세`;
           els.summary.innerHTML = formatSummary(data);
           els.trend.innerHTML = formatTrend(data.days);
+          
+          // Render Chart
+          renderChart(data.days);
+          
         } catch (error) {
           const message = `에러: ${error.message}`;
           els.summary.textContent = message;

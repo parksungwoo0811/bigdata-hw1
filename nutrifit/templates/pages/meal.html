@@ -20,7 +20,7 @@
         <div class="controls">
           <label>
             사용자 ID
-            <input id="user-id" type="text" value="{{ user_id }}" />
+            <input id="user-id" type="text" value="{{ current_user.id }}" readonly style="opacity: 0.7;" />
           </label>
           <button id="reload">추천 새로고침</button>
         </div>
@@ -29,6 +29,34 @@
       <section>
         <h2>남은 영양 밸런스</h2>
         <div id="summary" class="summary-cards">정보 없음</div>
+      </section>
+        
+      <!-- AI Smart Record Section -->
+      <section class="ai-card">
+        <h3>✨ AI 스마트 기록</h3>
+        <p class="muted small">"김치찌개랑 밥 한공기 먹었어" 처럼 말해보세요.</p>
+        <div class="manual-entry-grid" style="grid-template-columns: 1fr auto; margin-top: 16px;">
+          <input type="text" id="ai-food-input" placeholder="오늘 드신 음식을 자유롭게 적어주세요" />
+          <button id="ai-food-btn" style="background: #1976d2;">분석</button>
+        </div>
+      </section>
+
+      <!-- Manual Entry Section -->
+      <section>
+        <h3>직접 입력하기</h3>
+        <p class="muted small">추천 목록에 없는 음식을 드셨나요? 직접 입력해주세요.</p>
+        <form id="manual-form" class="manual-entry-grid">
+          <input type="text" name="food_name" placeholder="음식 이름" required />
+          <input type="number" name="kcal" placeholder="칼로리 (kcal)" step="any" required />
+          <input type="number" name="protein_g" placeholder="단백질 (g)" step="any" />
+          <input type="number" name="fat_g" placeholder="지방 (g)" step="any" />
+          <input type="number" name="carb_g" placeholder="탄수화물 (g)" step="any" />
+          <button type="submit">기록 추가</button>
+        </form>
+      </section>
+
+      <!-- Log Section -->
+      <section>
         <div id="food-log-container" class="log-container">
           <h3>오늘 기록한 식단</h3>
           <div id="food-log-list" class="list small">기록 없음</div>
@@ -43,7 +71,7 @@
     </div>
 
     <script>
-      const apiKey = "{{ api_key }}";
+      // const apiKey = "{{ api_key }}"; // Removed
       const els = {
         user: document.getElementById("user-id"),
         reload: document.getElementById("reload"),
@@ -51,13 +79,15 @@
         food: document.getElementById("food-list"),
         foodMessage: document.getElementById("food-message"),
         foodLogs: document.getElementById("food-log-list"),
+        aiInput: document.getElementById("ai-food-input"),
+        aiBtn: document.getElementById("ai-food-btn"),
       };
       let lastItems = [];
       let lastUserId = els.user.value.trim();
 
       const fetchJson = async (url, options = {}) => {
-        const headers = { "X-API-Key": apiKey, ...(options.headers || {}) };
-        const res = await fetch(url, { ...options, headers });
+        // const headers = { "X-API-Key": apiKey, ...(options.headers || {}) };
+        const res = await fetch(url, options);
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
           throw new Error(err.error || res.statusText);
@@ -243,6 +273,28 @@
         ]);
       };
       els.reload.addEventListener("click", reloadAll);
+      
+      document.getElementById("manual-form").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const userId = els.user.value.trim();
+        if (!userId) {
+          setFoodMessage("사용자 ID를 입력하세요.", "error");
+          return;
+        }
+        const formData = new FormData(e.target);
+        const roundOne = (val) => Math.round(Number(val) * 10) / 10;
+        const payload = {
+          user_id: userId,
+          food_name: formData.get("food_name"),
+          kcal: roundOne(formData.get("kcal")) || 0,
+          protein_g: roundOne(formData.get("protein_g")) || 0,
+          fat_g: roundOne(formData.get("fat_g")) || 0,
+          carb_g: roundOne(formData.get("carb_g")) || 0,
+        };
+        addFoodLog(payload);
+        e.target.reset();
+      });
+
       els.food.addEventListener("click", (event) => {
         if (!event.target.classList.contains("add-food")) return;
         const userId = els.user.value.trim();
@@ -268,6 +320,43 @@
         if (!logId || !userId) return;
         deleteFoodLog(logId, userId);
       });
+      els.aiBtn.addEventListener("click", async () => {
+        const text = els.aiInput.value.trim();
+        if (!text) {
+          setFoodMessage("내용을 입력해주세요.", "error");
+          return;
+        }
+        els.aiBtn.textContent = "분석 중...";
+        els.aiBtn.disabled = true;
+        try {
+          const data = await fetchJson("/api/ai/food", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text }),
+          });
+          
+          if (data.is_mock) {
+            setFoodMessage("⚠️ API 키가 없어 테스트 모드로 동작합니다.", "warning");
+          } else {
+            setFoodMessage("AI 분석 완료! 아래 정보를 확인해주세요.");
+          }
+
+          // Auto-fill form
+          const form = document.getElementById("manual-form");
+          form.querySelector('[name="food_name"]').value = data.food_name || "";
+          form.querySelector('[name="kcal"]').value = data.kcal || "";
+          form.querySelector('[name="protein_g"]').value = data.protein_g || "";
+          form.querySelector('[name="fat_g"]').value = data.fat_g || "";
+          form.querySelector('[name="carb_g"]').value = data.carb_g || "";
+          
+        } catch (error) {
+          setFoodMessage(`AI 분석 실패: ${error.message}`, "error");
+        } finally {
+          els.aiBtn.textContent = "분석";
+          els.aiBtn.disabled = false;
+        }
+      });
+
       reloadAll();
     </script>
   </body>

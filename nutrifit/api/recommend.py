@@ -32,7 +32,9 @@ def recommend_food(user_id):
 @api_bp.get("/recommend/workout/<user_id>")
 def recommend_workout(user_id):
     topn = int(request.args.get("topn", 3))
-    minutes = int(request.args.get("minutes", 20))
+    topn = int(request.args.get("topn", 3))
+    minutes_str = request.args.get("minutes")
+    minutes = int(minutes_str) if minutes_str else None
     raw_excludes = request.args.getlist("exclude")
     if not raw_excludes and request.args.get("exclude"):
         raw_excludes = [
@@ -46,4 +48,11 @@ def recommend_workout(user_id):
     )
     if not result["items"]:
         return jsonify({**result, "note": "user not found or no catalog data"})
+    return jsonify(result)
+
+
+
+@api_bp.get("/recommend/coach/<user_id>")
+def recommend_coach(user_id):
+    result = recommend_service.get_ai_coach_message(user_id)
     return jsonify(result)

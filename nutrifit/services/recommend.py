@@ -137,6 +137,95 @@ def dashboard(user_id: str) -> dict | None:
     return {"target": target, "eaten": eaten, "burn": burn, "remain": remain}
 
 
+
+def _macro(value):
+    if value is None:
+        return 0.0
+    try:
+        val = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if math.isnan(val):
+        return 0.0
+    return val
+
+
+def _normalize_name(name: str) -> str:
+    if not name:
+        return ""
+    base = re.sub(r"\(.*?\)", "", name)
+    base = base.replace("_", " ")
+    return re.sub(r"\s+", " ", base).strip().lower()
+
+
+def _coarse_key(name: str) -> str:
+    norm = _normalize_name(name)
+    if not norm:
+        return ""
+    tokens = [tok for tok in re.split(r"[\s/]+", norm) if tok]
+    if not tokens:
+        return norm
+    first = tokens[0]
+    if len(first) <= 1 and len(tokens) > 1:
+        first = first + tokens[1]
+    return first
+
+
+def _food_type(food: CatalogFood) -> str:
+    tags = (food.tags or "").lower()
+    name = (food.name or "").lower()
+    processed_keywords = (
+        "가공",
+        "음료",
+        "차",
+        "티",
+        "주스",
+        "캔디",
+        "젤리",
+        "바 ",
+        "바-",
+        "스낵",
+        "보충",
+        "음료수",
+    )
+    if any(keyword in tags for keyword in ("가공식품", "가공", "음료", "보충제", "간식")):
+        return "processed"
+    if any(keyword in name for keyword in processed_keywords):
+        return "processed"
+    return "natural"
+
+
+def _is_plausible_food(food: CatalogFood) -> bool:
+    kcal = _macro(food.kcal)
+    macros = {
+        "protein_g": _macro(food.protein_g),
+        "fat_g": _macro(food.fat_g),
+        "carb_g": _macro(food.carb_g),
+    }
+    total_macro = sum(macros.values())
+    est_kcal = 4 * (macros["protein_g"] + macros["carb_g"]) + 9 * macros["fat_g"]
+    if est_kcal <= 0 and kcal <= 0:
+        return False
+    ratio = kcal / max(est_kcal, 1.0)
+    if est_kcal > 0 and (ratio < 0.3 or ratio > 2.5):
+        return False
+    if kcal < 20 and total_macro < 8:
+        return False
+    return True
+
+
+def serialize_food(food: CatalogFood):
+    return {
+        "name": food.name,
+        "kcal": _macro(food.kcal),
+        "protein_g": _macro(food.protein_g),
+        "fat_g": _macro(food.fat_g),
+        "carb_g": _macro(food.carb_g),
+        "tags": food.tags,
+        "food_type": _food_type(food),
+    }
+
+
 def recommend_foods(
     user_id: str, topn: int = 3, exclude_names: list[str] | None = None
 ):
@@ -146,354 +235,183 @@ def recommend_foods(
         return {"items": [], "meals": []}
 
     rng = random.Random(datetime.utcnow().timestamp())
-
     remain = dash["remain"]
-    remain = {k: float(remain.get(k, 0) or 0.0) for k in remain}
+    remain_kcal = float(remain.get("kcal", 0) or 0.0)
+
+    # If remaining calories are very low or negative, just give a light recommendation or nothing?
+    # But usually users want to see something. We'll proceed.
+
     candidates = CatalogFood.query.all()
     if not candidates:
         return {"items": [], "meals": []}
+    
+    # Pre-filtering
+    candidates = [item for item in candidates if _is_plausible_food(item)]
 
+    # --- Profiling & Preferences (Keep existing logic) ---
     goal_type = (profile.goal_type or "balance").lower()
     metrics = _profile_metrics(profile)
     bmi = metrics["bmi"] or 22
     sex = (metrics["sex"] or "").lower()
     activity_level = (profile.activity_level or "moderate").lower()
-
-    protein_bias = 1.5 if goal_type == "gain_muscle" else 1.0
-    fat_bias = 1.3 if goal_type == "cut" or bmi > 27 else 1.0
-    carb_bias = 1.2 if goal_type == "balance" else 1.0
-    if bmi < 20:
-        carb_bias += 0.4
-
-    goal_preferences = {
-        "cut": {
-            "calorie_weight": 1.3,
-            "density_weight": 1.4,
-            "protein_emphasis": 1.2,
-            "fat_emphasis": 1.3,
-            "carb_emphasis": 1.0,
-            "meal_split": (0.35, 0.4, 0.25),
-        },
-        "gain_muscle": {
-            "calorie_weight": 0.85,
-            "density_weight": 0.7,
-            "protein_emphasis": 1.8,
-            "fat_emphasis": 0.9,
-            "carb_emphasis": 1.05,
-            "meal_split": (0.3, 0.45, 0.25),
-        },
-        "balance": {
-            "calorie_weight": 1.0,
-            "density_weight": 1.0,
-            "protein_emphasis": 1.1,
-            "fat_emphasis": 1.0,
-            "carb_emphasis": 1.1,
-            "meal_split": (0.3, 0.4, 0.3),
-        },
-    }
-    pref = goal_preferences.get(goal_type, goal_preferences["balance"])
-    protein_bias *= pref["protein_emphasis"]
-    fat_bias *= pref["fat_emphasis"]
-    carb_bias *= pref["carb_emphasis"]
-
+    
+    # We will use simple calorie targets for this iteration
     estimated_kcal = _estimate_calories(profile)
-    sex_appetite = 1.05 if sex == "male" else 0.97 if sex == "female" else 1.0
-    activity_appetite = {"low": 0.95, "moderate": 1.0, "high": 1.1}.get(
-        activity_level, 1.0
-    )
-    portion_factor = max(estimated_kcal / 2000.0, 0.7) * sex_appetite * activity_appetite
-    if bmi > 27:
-        portion_factor *= 0.85
-
-    macro_fields = ("protein_g", "fat_g", "carb_g")
-
-    def _macro(value):
-        if value is None:
-            return 0.0
-        try:
-            val = float(value)
-        except (TypeError, ValueError):
-            return 0.0
-        if math.isnan(val):
-            return 0.0
-        return val
-
-    def _is_plausible_food(food: CatalogFood) -> bool:
-        kcal = _macro(food.kcal)
-        macros = {
-            "protein_g": _macro(food.protein_g),
-            "fat_g": _macro(food.fat_g),
-            "carb_g": _macro(food.carb_g),
-        }
-        total_macro = sum(macros.values())
-        est_kcal = 4 * (macros["protein_g"] + macros["carb_g"]) + 9 * macros["fat_g"]
-        if est_kcal <= 0 and kcal <= 0:
-            return False
-        ratio = kcal / max(est_kcal, 1.0)
-        if est_kcal > 0 and (ratio < 0.3 or ratio > 2.5):
-            return False
-        if kcal < 20 and total_macro < 8:
-            return False
-        return True
-
-    candidates = [item for item in candidates if _is_plausible_food(item)]
-
-    def _normalize_name(name: str) -> str:
-        if not name:
-            return ""
-        base = re.sub(r"\(.*?\)", "", name)
-        base = base.replace("_", " ")
-        return re.sub(r"\s+", " ", base).strip().lower()
-
-    def _coarse_key(name: str) -> str:
-        norm = _normalize_name(name)
-        if not norm:
-            return ""
-        tokens = [tok for tok in re.split(r"[\s/]+", norm) if tok]
-        if not tokens:
-            return norm
-        first = tokens[0]
-        if len(first) <= 1 and len(tokens) > 1:
-            first = first + tokens[1]
-        return first
-
-    def _food_type(food: CatalogFood) -> str:
-        tags = (food.tags or "").lower()
-        name = (food.name or "").lower()
-        processed_keywords = (
-            "가공",
-            "음료",
-            "차",
-            "티",
-            "주스",
-            "캔디",
-            "젤리",
-            "바 ",
-            "바-",
-            "스낵",
-            "보충",
-            "음료수",
-        )
-        if any(keyword in tags for keyword in ("가공식품", "가공", "음료", "보충제", "간식")):
-            return "processed"
-        if any(keyword in name for keyword in processed_keywords):
-            return "processed"
-        return "natural"
-
-    def _quality_penalty(food_macros: dict, kcal: float) -> float:
-        est_kcal = (
-            4 * (food_macros["protein_g"] + food_macros["carb_g"])
-            + 9 * food_macros["fat_g"]
-        )
-        if est_kcal <= 0:
-            return 15.0
-        ratio = kcal / max(est_kcal, 1.0)
-        if ratio < 0.4:
-            return (0.4 - ratio) * 60
-        if ratio > 1.8:
-            return (ratio - 1.8) * 15
-        return 0.0
-
-    def rank_for_needs(needs: dict):
-        macro_needs = {
-            field: max(needs.get(field, 0.0), 0.0) for field in macro_fields
-        }
-        macro_normalizer = len([f for f, need in macro_needs.items() if need > 0]) or len(
-            macro_fields
-        )
-        calorie_budget = max(needs.get("kcal", 0.0), 0.0)
-        calorie_floor = max(
-            calorie_budget, estimated_kcal * 0.05 * sex_appetite * activity_appetite
-        )
-
-        min_kcal_required = (
-            max(70.0, calorie_budget * 0.18) if calorie_budget >= 180 else 0.0
-        )
-
-        def score(food: CatalogFood):
-            kcal = _macro(food.kcal)
-            food_macros = {
-                "protein_g": _macro(food.protein_g),
-                "fat_g": _macro(food.fat_g),
-                "carb_g": _macro(food.carb_g),
-            }
-            if calorie_budget > 0:
-                kcal_penalty = (
-                    max(kcal - calorie_budget, 0) * 2 / portion_factor
-                ) * pref["calorie_weight"]
-            else:
-                kcal_penalty = (kcal / calorie_floor) * 4 * pref["calorie_weight"]
-
-            if min_kcal_required and kcal < min_kcal_required:
-                kcal_penalty += (min_kcal_required - kcal) * 0.4
-
-            macro_penalty = 0.0
-            coverage = 0.0
-            density_reward = 0.0
-            for field in macro_fields:
-                need = macro_needs[field]
-                have = food_macros[field]
-                bias = {
-                    "protein_g": protein_bias,
-                    "fat_g": fat_bias,
-                    "carb_g": carb_bias,
-                }[field]
-                if need <= 0:
-                    macro_penalty += have * 0.05 * bias
-                    continue
-                diff_ratio = abs(have - need) / max(need, 1.0)
-                macro_penalty += diff_ratio**2 * bias
-                coverage += min(have, need) / max(need, 1.0)
-                if kcal > 0:
-                    density_reward += (min(have, need) / max(kcal, 1)) * bias
-
-            coverage_gap = max(1 - (coverage / macro_normalizer), 0.0)
-            quality_pen = _quality_penalty(food_macros, kcal)
-            return (
-                kcal_penalty * 0.6
-                + macro_penalty * 8
-                + coverage_gap * 5
-                - density_reward
-                * (25 if calorie_budget <= 0 else 6)
-                * pref["density_weight"]
-                + quality_pen
-            )
-
-        return sorted(candidates, key=score)
-
-    def serialize_food(food: CatalogFood):
-        return {
-            "name": food.name,
-            "kcal": _macro(food.kcal),
-            "protein_g": _macro(food.protein_g),
-            "fat_g": _macro(food.fat_g),
-            "carb_g": _macro(food.carb_g),
-            "tags": food.tags,
-            "food_type": _food_type(food),
-        }
-
-    meal_split = list(pref["meal_split"])
+    
+    # Weights for meal split
+    meal_split = [0.3, 0.4, 0.3] # Default balance
     if sex == "male":
-        meal_split[0] -= 0.04
-        meal_split[1] += 0.025
-        meal_split[2] += 0.015
+        meal_split = [0.26, 0.425, 0.315]
     elif sex == "female":
-        meal_split[0] += 0.02
-        meal_split[2] -= 0.02
+        meal_split = [0.32, 0.4, 0.28]
+    
     if activity_level == "high":
-        meal_split[1] += 0.03
-        meal_split[2] += 0.02
-        meal_split[0] -= 0.05
+        meal_split[1] += 0.05; meal_split[2] += 0.02; meal_split[0] -= 0.07;
     elif activity_level == "low":
-        meal_split[0] += 0.03
-        meal_split[2] -= 0.03
+        meal_split[0] += 0.05; meal_split[2] -= 0.05;
+    
+    # Normalize
+    s = sum(meal_split)
+    meal_split = [x/s for x in meal_split]
 
-    meal_split = [max(0.15, ratio) for ratio in meal_split]
-    total_ratio = sum(meal_split)
-    meal_split = [ratio / total_ratio for ratio in meal_split]
-
-    MEAL_SPLIT = [
-        ("breakfast", {"label": "아침", "ratio": meal_split[0]}),
-        ("lunch", {"label": "점심", "ratio": meal_split[1]}),
-        ("dinner", {"label": "저녁", "ratio": meal_split[2]}),
+    MEAL_DEFINITIONS = [
+        ("breakfast", "아침", meal_split[0]),
+        ("lunch", "점심", meal_split[1]),
+        ("dinner", "저녁", meal_split[2]),
     ]
-
-    meals = []
+    
+    # --- Tracking Usage to avoid duplicates ---
+    used_names = set()
+    if exclude_names:
+        for n in exclude_names:
+            norm = _normalize_name(n)
+            if norm: used_names.add(norm)
+    
     flat_items = []
-    exclude_norms = {
-        _normalize_name(name) for name in (exclude_names or []) if name.strip()
-    }
-    used_names = set(exclude_norms)
-    used_groups = defaultdict(int)
-    for name in (exclude_names or []):
-        key = _coarse_key(name)
-        if key:
-            used_groups[key] = 1
+    meals_result = []
 
-    for key, meta in MEAL_SPLIT:
-        portion = meta["ratio"]
-        targets = {
-            nutrient: max(remain.get(nutrient, 0.0), 0.0) * portion
-            for nutrient in ("kcal", "protein_g", "fat_g", "carb_g")
-        }
-        ranked = rank_for_needs(targets)
-        pool_limit = max(topn + 12, topn * 4)
-        top_pool = ranked[:pool_limit]
-        random_pool = top_pool[:]
-        rng.shuffle(random_pool)
+    def _get_valid_candidates(pool, current_meal_items):
+        # Filter out used names and items too similar to what's in current meal
+        valid = []
+        current_names = {_normalize_name(x['name']) for x in current_meal_items}
+        
+        for food in pool:
+            norm = _normalize_name(food.name)
+            if not norm: continue
+            if norm in used_names: continue
+            if norm in current_names: continue
+            valid.append(food)
+        return valid
 
+    for key, label, ratio in MEAL_DEFINITIONS:
+        # 1. Determine Target for this meal
+        # We base it on REMAINING calories distributed, but constrained?
+        # If user has 2000 remaining, and it's breakfast time, maybe we shouldn't suggest 2000?
+        # But 'recommend' usually implies "plan for the day". 
+        # The existing logic seemed to slice 'remain' by ratio. Let's stick to that.
+        
+        target_kcal = max(remain_kcal * ratio, 0)
+        # However, if target is too small (e.g. 50kcal), we might want minimums
+        
         meal_items = []
-        meal_norms = set()
-        meal_groups = set()
+        current_kcal = 0
 
-        def _can_use(food: CatalogFood) -> bool:
-            norm = _normalize_name(food.name)
-            if not norm:
-                return False
-            if norm in used_names or norm in meal_norms:
-                return False
-            coarse = _coarse_key(food.name)
-            if coarse:
-                limit = 1
-                if used_groups.get(coarse, 0) >= limit or coarse in meal_groups:
-                    return False
-            return True
+        main_ratio = 0.7 if target_kcal > 500 else 0.9
+        main_target = target_kcal * main_ratio
+        
+        valid_pool = _get_valid_candidates(candidates, meal_items)
+        if not valid_pool: break
 
-        def _take(food: CatalogFood):
-            norm = _normalize_name(food.name)
-            meal_items.append(serialize_food(food))
-            used_names.add(norm)
-            meal_norms.add(norm)
-            coarse = _coarse_key(food.name)
-            if coarse:
-                used_groups[coarse] += 1
-                meal_groups.add(coarse)
-
-        def _pick_from(source: list[CatalogFood], category: str | None = None) -> bool:
-            for food in source:
-                if len(meal_items) >= topn:
-                    return False
-                if category and _food_type(food) != category:
-                    continue
-                if not _can_use(food):
-                    continue
-                _take(food)
-                return True
-            return False
-
-        def _ensure_category(category: str):
-            if len(meal_items) >= topn:
-                return
-            has_available = any(
-                _food_type(food) == category and _can_use(food) for food in ranked
-            )
-            if not has_available:
-                return
-            if _pick_from(top_pool, category):
-                return
-            _pick_from(ranked, category)
-
-        _ensure_category("natural")
-        _ensure_category("processed")
-
-        if len(meal_items) < topn:
-            _pick_from(random_pool)
-
-        if len(meal_items) < topn:
-            _pick_from(ranked)
-        meals.append(
-            {
-                "key": key,
-                "label": meta["label"],
-                "ratio": portion,
-                "targets": targets,
-                "items": meal_items,
-            }
-        )
+        # Heuristic: Score by abs(kcal - main_target)
+        # Add some randomness to avoid always same result
+        def score_main(f):
+            k = _macro(f.kcal)
+            diff = abs(k - main_target)
+            return diff + rng.uniform(0, 30) # Random jitter
+            
+        main_dish = min(valid_pool, key=score_main)
+        
+        # Add Main
+        serialized_main = serialize_food(main_dish)
+        meal_items.append(serialized_main)
+        used_names.add(_normalize_name(main_dish.name))
+        current_kcal += _macro(main_dish.kcal)
+        
+        # Step B: Select Side Dishes (Fill the gap)
+        # Allow up to 2 sides (total 3 items)
+        max_items = 3
+        
+        while len(meal_items) < max_items:
+            gap = target_kcal - current_kcal
+            
+            # We want to force finding items until max_items is reached
+            # even if gap is small. We will just look for the best fitting (small) item.
+            
+            valid_pool = _get_valid_candidates(candidates, meal_items)
+            if not valid_pool: break
+            
+            # Prefer different food_type from main if possible?
+            main_type = serialized_main['food_type']
+            
+            def score_side(f):
+                k = _macro(f.kcal)
+                diff = abs(k - gap)
+                
+                # Variety bonus
+                ftype = _food_type(f)
+                type_penalty = 0 if ftype != main_type else 20
+                
+                return diff + type_penalty + rng.uniform(0, 20)
+                
+            side_dish = min(valid_pool, key=score_side)
+            
+            serialized_side = serialize_food(side_dish)
+            meal_items.append(serialized_side)
+            used_names.add(_normalize_name(side_dish.name))
+            current_kcal += _macro(side_dish.kcal)
+            
+        # Compile Meal Stats
+        meal_targets = {
+            "kcal": target_kcal,
+            "protein_g": dash["target"]["protein_g"] * ratio, # Rough estimate
+            "fat_g": dash["target"]["fat_g"] * ratio,
+            "carb_g": dash["target"]["carb_g"] * ratio,
+        }
+        
+        meals_result.append({
+            "key": key,
+            "label": label,
+            "ratio": ratio,
+            "targets": meal_targets,
+            "items": meal_items
+        })
         flat_items.extend(meal_items)
 
-    return {"meals": meals, "items": flat_items}
+    return {"meals": meals_result, "items": flat_items}
 
+
+
+
+def _calc_ideal_duration(profile_obj):
+    """Shared logic for calculating ideal workout duration."""
+    # Base duration
+    base = 30
+    
+    # Goal adjustment
+    g_type = getattr(profile_obj, 'goal_type', 'balance') or 'balance'
+    if g_type == "cut":
+        base += 20 # Target ~50m
+    elif g_type == "gain_muscle":
+        base += 10 # Target ~40m
+    
+    # Activity adjustment
+    act = (getattr(profile_obj, 'activity_level', 'moderate') or 'moderate').lower()
+    if act == "high":
+        base += 10
+    elif act == "low":
+        base -= 5
+        
+    return max(20, min(base, 90)) # Clamp between 20 and 90 minutes
 
 def auto_goal_plan(data: dict) -> dict:
     """Recommend goal calories/macros from raw profile data."""
@@ -517,11 +435,16 @@ def auto_goal_plan(data: dict) -> dict:
         raise ValueError("나이/키/몸무게는 숫자여야 합니다.")
 
     targets = _goal_targets(profile_stub)
+    
+    # Calculate recommended exercise minutes
+    rec_minutes = _calc_ideal_duration(profile_stub)
+    
     return {
         "goal_kcal": targets["kcal"],
         "protein_g": targets["protein_g"],
         "fat_g": targets["fat_g"],
         "carb_g": targets["carb_g"],
+        "exercise_minutes": rec_minutes,
     }
 
 
@@ -531,7 +454,7 @@ def recommend_workouts(
     profile = UserProfile.query.get(user_id)
     dash = dashboard(user_id)
     if not dash or not profile:
-        return {"items": [], "requested_minutes": minutes, "assigned_minutes": 0}
+        return {"items": [], "requested_minutes": minutes, "assigned_minutes": 0, "recommended_minutes": 0}
 
     rng = random.Random(datetime.utcnow().timestamp())
 
@@ -584,7 +507,17 @@ def recommend_workouts(
         return (max(1.5, low), min(high, 12.0))
 
     met_low, met_high = preferred_met_range()
+    
+    # Calculate IDEAL duration based on profile
+    ideal_minutes = _calc_ideal_duration(profile)
 
+    # Determine TARGET duration (Requested > Ideal)
+    # If minutes is None/0, use ideal. Otherwise use requested.
+    if minutes and minutes > 0:
+        target_minutes = minutes
+    else:
+        target_minutes = ideal_minutes
+    
     CATEGORY_PLAN = {
         "cut": ["cardio", "strength", "lifestyle", "cardio", "stretch"],
         "balance": ["cardio", "strength", "stretch", "lifestyle"],
@@ -618,23 +551,38 @@ def recommend_workouts(
         est_minutes = min(workout.max_minutes or remain_minutes, remain_minutes)
         est_minutes = max(est_minutes, workout.min_minutes or 10)
         est_burn = workout.mets * weight * 0.0175 * est_minutes
-        burn_gap = abs(remain_kcal_value - est_burn)
-        # 짧지만 필요한 시간과 가까운 운동을 약간 우대
+        
+        if remain_kcal_value < 0:
+            target_burn = abs(remain_kcal_value)
+            if est_burn < target_burn:
+                burn_penalty = (target_burn - est_burn) * 1.5
+            else:
+                burn_penalty = 0
+        else:
+            if goal_type == "cut":
+                burn_penalty = max(0, 300 - est_burn) * 0.5
+            elif goal_type == "gain_muscle":
+                burn_penalty = abs(est_burn - 250) * 0.5
+            else:
+                burn_penalty = 0
+
         time_gap = abs(est_minutes - remain_minutes)
+        
         if workout.mets < met_low:
             intensity_penalty = (met_low - workout.mets) ** 2
         elif workout.mets > met_high:
             intensity_penalty = (workout.mets - met_high) ** 2
         else:
             intensity_penalty = 0
+            
         return (
-            burn_gap
+            burn_penalty
             + time_gap * 4 * intensity_bias(workout.category, workout.mets)
             + intensity_penalty * 8
         )
-    remaining = minutes
+        
+    remaining = target_minutes
     selected = []
-
     MIN_SLOT_MINUTES = 10
 
     def _remove_from_pools(workout):
@@ -645,105 +593,94 @@ def recommend_workouts(
 
     def _can_use(workout, allow_excluded=False):
         norm = _normalize_name(workout.name)
-        if not norm:
-            return False
-        if norm in used_norms:
-            return False
-        if not allow_excluded and norm in excluded:
-            return False
+        if not norm: return False
+        if norm in used_norms: return False
+        if not allow_excluded and norm in excluded: return False
         return True
 
     def _get_pool(category: str | None, allow_excluded=False):
         sources = [primary_pool, fallback_pool]
         for source in sources:
-            filtered = [
-                w
-                for w in source
-                if (category is None or w.category == category)
-                and _can_use(w, allow_excluded)
-            ]
-            if filtered:
-                return filtered
+            filtered = [w for w in source if (category is None or w.category == category) and _can_use(w, allow_excluded)]
+            if filtered: return filtered
         return []
 
     while fallback_pool and remaining > 0 and len(selected) < topn:
         desired_category = category_sequence[len(selected) % len(category_sequence)]
         pool = _get_pool(desired_category, allow_excluded=False)
-        if not pool:
-            pool = _get_pool(None, allow_excluded=False)
-        if not pool:
-            pool = _get_pool(desired_category, allow_excluded=True)
-        if not pool:
-            pool = _get_pool(None, allow_excluded=True)
+        if not pool: pool = _get_pool(None, allow_excluded=False)
+        if not pool: pool = _get_pool(desired_category, allow_excluded=True)
+        if not pool: pool = _get_pool(None, allow_excluded=True)
+        if not pool: break
+
+        slots_left = topn - len(selected)
+        reserved = (slots_left - 1) * MIN_SLOT_MINUTES
+        budget = remaining - reserved
+        
         if not pool:
             break
 
-        pool.sort(key=lambda w: score(w, remaining, remain_kcal))
-        slice_size = max(1, min(3, len(pool)))
-        choice_pool = pool[:slice_size]
-        workout = rng.choice(choice_pool)
+        workout = max(pool, key=lambda w: score(w, budget, dash["remain"]["kcal"]))
+        
+        actual_min = min(workout.max_minutes or budget, budget)
+        actual_min = max(actual_min, workout.min_minutes or 10)
+        
+        if len(selected) == topn - 1:
+             actual_min = min(workout.max_minutes or remaining, remaining)
+
+        actual_min = min(actual_min, remaining)
+        
+        selected.append(SimpleNamespace(
+            id=workout.workout_id,
+            name=workout.name,
+            category=workout.category,
+            mets=workout.mets,
+            suggested_minutes=actual_min,
+            per_min_kcal=workout.mets * weight * 0.0175,
+            total_kcal=workout.mets * weight * 0.0175 * actual_min
+        ))
+        
+        remaining -= actual_min
         _remove_from_pools(workout)
-
-        min_min = workout.min_minutes or 10
-        max_min = workout.max_minutes or min_min
-        if min_min > max_min:
-            max_min = min_min
-
-        remaining_slots = max(topn - len(selected) - 1, 0)
-        reserve = remaining_slots * MIN_SLOT_MINUTES
-
-        if remaining <= min_min or (not selected and remaining < min_min):
-            assign = remaining
-        else:
-            if remaining > reserve:
-                max_allow = remaining - reserve
-            else:
-                max_allow = remaining
-            max_allow = min(max_allow, max_min)
-            assign = max(min_min, max_allow)
-            assign = min(assign, remaining)
-        if assign <= 0:
-            continue
-
-        selected.append(
-            {
-                "name": workout.name,
-                "mets": workout.mets,
-                "category": workout.category,
-                "suggested_minutes": assign,
-                "min_minutes": min_min,
-                "max_minutes": max_min,
-                "per_min_kcal": workout.mets * weight * 1.05 / 60.0,
-                "total_kcal": workout.mets * weight * 1.05 * (assign / 60.0),
-            }
-        )
-        remaining -= assign
         used_norms.add(_normalize_name(workout.name))
 
-    # distribute leftover minutes if any
+    # Post-processing: If time remains, distribute it to items that can extend
     if remaining > 0 and selected:
+        # Sort by those who can take more time (no max, or max > current)
+        # Or just distribute to the ones with largest current duration (likely cardio)
+        candidates_for_extension = []
         for item in selected:
-            available = item["max_minutes"] - item["suggested_minutes"]
-            if available <= 0:
-                continue
-            add = min(available, remaining)
-            item["suggested_minutes"] += add
-            remaining -= add
-            if remaining <= 0:
-                break
+            # Re-fetch original workout for limits (or store in item)
+            # We didn't store max_minutes in item, so we rely on heuristic or need to look up.
+            # Simplified: Just add to items with high METs (Cardio) or largest duration
+            candidates_for_extension.append(item)
+        
+        # Simple round-robin distribution
+        while remaining > 0 and candidates_for_extension:
+            made_change = False
+            for item in candidates_for_extension:
+                if remaining <= 0: break
+                # limit extension per item? Let's say we trust the user's total over the strict db limit for now
+                add = min(remaining, 5) # Add 5 mins at a time
+                item.suggested_minutes += add
+                item.total_kcal = item.per_min_kcal * item.suggested_minutes
+                remaining -= add
+                made_change = True
+            if not made_change: break # Should not happen if we force add
 
-    total_assigned = sum(item["suggested_minutes"] for item in selected)
-
-    # Cleanup metadata not needed by client
-    for item in selected:
-        item.pop("min_minutes", None)
-        item.pop("max_minutes", None)
+    # Cleanup metadata and serialize
+    result_items = []
+    for x in selected:
+        d = vars(x)
+        d.pop("min_minutes", None)
+        d.pop("max_minutes", None)
+        result_items.append(d)
 
     return {
-        "items": selected,
-        "requested_minutes": minutes,
-        "assigned_minutes": total_assigned,
-        "unfilled_minutes": max(minutes - total_assigned, 0),
+        "items": result_items,
+        "requested_minutes": target_minutes,
+        "recommended_minutes": ideal_minutes,
+        "assigned_minutes": sum(x.suggested_minutes for x in selected)
     }
 
 
@@ -798,23 +735,87 @@ def weekly_report(user_id: str, days: int = 7) -> dict | None:
         day_str = str(day)
         eat = food_map.get(day_str, 0.0)
         burn = workout_map.get(day_str, 0.0)
-        gap = target - eat + burn
-        days_list.append(
-            {
-                "date": day_str,
-                "eat": round(eat),
-                "burn": round(burn),
-                "gap": round(gap),
-            }
-        )
-        compliance.append(1 if abs(gap) <= target * 0.1 else 0)
+        
+        net = eat - burn
+        # Compliance: +/- 10% of target? Or just below target for cut?
+        # Let's use a simple range: target +/- 15%
+        lower = target * 0.85
+        upper = target * 1.15
+        
+        status = "good"
+        if net < lower:
+            status = "low"
+        elif net > upper:
+            status = "high"
+            
+        days_list.append({
+            "date": day_str,
+            "eaten": round(eat, 1),
+            "burned": round(burn, 1),
+            "net": round(net, 1),
+            "target": round(target, 1),
+            "status": status
+        })
+        
+        if status == "good":
+            compliance.append(1)
+        else:
+            compliance.append(0)
 
-    summary = {
-        "avg_eat": round(sum(d["eat"] for d in days_list) / days, 1) if days_list else 0,
-        "avg_burn": round(sum(d["burn"] for d in days_list) / days, 1) if days_list else 0,
-        "max_eat": max((d["eat"] for d in days_list), default=0),
-        "min_eat": min((d["eat"] for d in days_list), default=0),
-        "compliance": round(sum(compliance) / len(compliance) * 100, 1) if compliance else 0,
+    avg_compliance = sum(compliance) / len(compliance) if compliance else 0.0
+    
+    eat_values = [d["eaten"] for d in days_list]
+    burn_values = [d["burned"] for d in days_list]
+    
+    avg_eat = sum(eat_values) / len(eat_values) if eat_values else 0.0
+    avg_burn = sum(burn_values) / len(burn_values) if burn_values else 0.0
+    max_eat = max(eat_values) if eat_values else 0.0
+    min_eat = min(eat_values) if eat_values else 0.0
+    
+    return {
+        "days": days_list,
+        "summary": {
+            "avg_compliance": round(avg_compliance * 100, 1),
+            "avg_eat": round(avg_eat, 1),
+            "avg_burn": round(avg_burn, 1),
+            "max_eat": round(max_eat, 1),
+            "min_eat": round(min_eat, 1),
+            "compliance": round(avg_compliance * 100, 1),
+            "target_daily": round(target, 1)
+        }
+    }
+    return {
+        "days": days_list,
+        "summary": {
+            "avg_compliance": round(avg_compliance * 100, 1),
+            "avg_eat": round(avg_eat, 1),
+            "avg_burn": round(avg_burn, 1),
+            "max_eat": round(max_eat, 1),
+            "min_eat": round(min_eat, 1),
+            "compliance": round(avg_compliance * 100, 1),
+            "target_daily": round(target, 1)
+        }
     }
 
-    return {"days": days_list, "summary": summary, "target": round(target)}
+
+def get_ai_coach_message(user_id: str) -> dict:
+    dash = dashboard(user_id)
+    if not dash:
+        return {"message": "데이터가 없습니다."}
+    
+    # Construct context
+    target = dash["target"]["kcal"]
+    eaten = dash["eaten"]["kcal"]
+    burn = dash["burn"]
+    remain = dash["remain"]["kcal"]
+    
+    context = (
+        f"Target Calories: {target}, Eaten: {eaten}, Burned: {burn}, Remaining: {remain}. "
+        f"Macros Eaten - Protein: {dash['eaten']['protein_g']}g, Fat: {dash['eaten']['fat_g']}g, Carb: {dash['eaten']['carb_g']}g."
+    )
+    
+    from .ai import get_ai_service
+    ai = get_ai_service()
+    message = ai.generate_tip(context)
+    
+    return {"message": message}

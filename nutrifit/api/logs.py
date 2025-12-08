@@ -29,6 +29,14 @@ def add_food_log():
     if not required.issubset(payload):
         return jsonify({"error": "user_id, food_name, kcal are required"}), 400
 
+    # Round float values to 1 decimal place as per requirement
+    for key in ["kcal", "protein_g", "fat_g", "carb_g"]:
+        if key in payload and payload[key] is not None:
+            try:
+                payload[key] = round(float(payload[key]), 1)
+            except (ValueError, TypeError):
+                pass # Let validation or DB handle invalid types
+
     log = FoodLog(**payload)
     db.session.add(log)
     db.session.commit()
@@ -70,6 +78,14 @@ def add_workout_log():
     required = {"user_id", "workout_name", "kcal_burn"}
     if not required.issubset(payload):
         return jsonify({"error": "user_id, workout_name, kcal_burn are required"}), 400
+
+    # Round float values to 1 decimal place as per requirement
+    for key in ["minutes", "kcal_burn"]:
+        if key in payload and payload[key] is not None:
+            try:
+                payload[key] = round(float(payload[key]), 1)
+            except (ValueError, TypeError):
+                pass
 
     log = WorkoutLog(**payload)
     db.session.add(log)

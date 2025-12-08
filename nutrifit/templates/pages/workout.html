@@ -17,11 +17,11 @@
         <div class="controls">
           <label>
             사용자 ID
-            <input id="user-id" type="text" value="{{ user_id }}" />
+            <input id="user-id" type="text" value="{{ current_user.id }}" readonly style="opacity: 0.7;" />
           </label>
           <label>
-            추천 분량(분)
-            <input id="minutes" type="number" min="10" max="90" value="{{ minutes }}" />
+            AI 추천 시간
+            <input id="ai-minutes-display" type="text" value="--분" readonly style="color:var(--accent); font-weight:600;" />
           </label>
           <button id="reload">추천 새로고침</button>
         </div>
@@ -30,6 +30,32 @@
       <section>
         <h2>칼로리 갭 요약</h2>
         <div id="summary" class="summary-cards">정보 없음</div>
+      </section>
+        
+      <!-- AI Smart Record Section -->
+      <section class="ai-card">
+        <h3>✨ AI 스마트 기록</h3>
+        <p class="muted small">"30분 동안 가볍게 조깅했어" 처럼 말해보세요.</p>
+        <div class="manual-entry-grid" style="grid-template-columns: 1fr auto; margin-top: 16px;">
+          <input type="text" id="ai-workout-input" placeholder="오늘 하신 운동을 자유롭게 적어주세요" />
+          <button id="ai-workout-btn" style="background: #0097a7;">분석</button>
+        </div>
+      </section>
+
+      <!-- Manual Entry Section -->
+      <section>
+        <h3>직접 입력하기</h3>
+        <p class="muted small">추천 목록에 없는 운동을 하셨나요? 직접 입력해주세요.</p>
+        <form id="manual-form" class="manual-entry-grid">
+          <input type="text" name="workout_name" placeholder="운동 이름 (예: 줄넘기)" required />
+          <input type="number" name="minutes" placeholder="시간 (분)" step="any" required />
+          <input type="number" name="kcal_burn" placeholder="소모 칼로리 (kcal)" step="any" required />
+          <button type="submit">기록 추가</button>
+        </form>
+      </section>
+
+      <!-- Log Section -->
+      <section>
         <div id="workout-log-container" class="log-container">
           <h3>오늘 기록한 운동</h3>
           <div id="workout-log-list" class="list small">기록 없음</div>
@@ -44,24 +70,28 @@
     </div>
 
     <script>
-      const apiKey = "{{ api_key }}";
+      // const apiKey = "{{ api_key }}"; // Removed
       const els = {
         user: document.getElementById("user-id"),
-        minutes: document.getElementById("minutes"),
+        // minutes input removed
+        aiDisplay: document.getElementById("ai-minutes-display"),
         reload: document.getElementById("reload"),
         summary: document.getElementById("summary"),
         list: document.getElementById("workout-list"),
         message: document.getElementById("workout-message"),
         logs: document.getElementById("workout-log-list"),
+        aiInput: document.getElementById("ai-workout-input"),
+        aiBtn: document.getElementById("ai-workout-btn"),
+        manualForm: document.getElementById("manual-form"),
       };
       let lastWorkouts = [];
       let lastUserId = els.user.value.trim();
-      let lastMinutes = Number(els.minutes.value || 20);
+      let lastMinutes = 0; // Default to 0 (Auto)
       let lastAssignedMinutes = 0;
 
       const fetchJson = async (url, options = {}) => {
-        const headers = { "X-API-Key": apiKey, ...(options.headers || {}) };
-        const res = await fetch(url, { ...options, headers });
+        // const headers = { "X-API-Key": apiKey, ...(options.headers || {}) };
+        const res = await fetch(url, options);
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
           throw new Error(err.error || res.statusText);
@@ -72,13 +102,17 @@
       const formatSummary = (dash, workouts) => {
         if (!dash) return '<p class="muted">데이터 없음</p>';
         const assigned = workouts?.assigned_minutes ?? 0;
-        const requested = workouts?.requested_minutes ?? els.minutes.value;
+        const requested = workouts?.requested_minutes ?? "AI 자동";
         return `
           <div class="summary-grid">
+            <div class="summary-card">
+              <p class="label">목표 칼로리</p>
+              <p class="value">${Math.round(dash.target?.kcal ?? 0)} kcal</p>
+            </div>
             <div class="summary-card emphasis">
               <p class="label">남은 칼로리</p>
               <p class="value">${Math.round(dash.remain?.kcal ?? 0)} kcal</p>
-              <p class="detail">요청 ${requested}분 · 추천 ${assigned}분</p>
+
             </div>
           </div>
         `;
@@ -98,6 +132,40 @@
         els.message.textContent = text;
         els.message.className = `${type} small`;
       };
+      els.aiBtn.addEventListener("click", async () => {
+        const text = els.aiInput.value.trim();
+        if (!text) {
+          setWorkoutMessage("내용을 입력해주세요.", "error");
+          return;
+        }
+        els.aiBtn.textContent = "분석 중...";
+        els.aiBtn.disabled = true;
+        try {
+          const data = await fetchJson("/api/ai/workout", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text }),
+          });
+
+          if (data.is_mock) {
+            setWorkoutMessage("⚠️ API 키가 없어 테스트 모드로 동작합니다.", "warning");
+          } else {
+            setWorkoutMessage("AI 분석 완료! 아래 정보를 확인해주세요.");
+          }
+
+          // Auto-fill form
+          const form = els.manualForm;
+          form.querySelector('[name="workout_name"]').value = data.workout_name || "";
+          form.querySelector('[name="minutes"]').value = data.minutes || "";
+          form.querySelector('[name="kcal_burn"]').value = data.kcal_burn || "";
+
+        } catch (error) {
+          setWorkoutMessage(`AI 분석 실패: ${error.message}`, "error");
+        } finally {
+          els.aiBtn.textContent = "분석";
+          els.aiBtn.disabled = false;
+        }
+      });
       const renderWorkoutLogs = (items = []) => {
         if (!items.length) {
           els.logs.innerHTML = '<p class="muted small">기록 없음</p>';
@@ -129,6 +197,21 @@
         }
       };
 
+      const addWorkoutLog = async (payload) => {
+        try {
+          await fetchJson("/api/workout-log", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const userId = els.user.value.trim();
+          setWorkoutMessage("운동이 기록되었습니다.", "success");
+          await Promise.all([loadSummaryOnly(userId), loadWorkoutLogs(userId)]);
+        } catch (error) {
+          setWorkoutMessage(`기록 실패: ${error.message}`, "error");
+        }
+      };
+
       const deleteWorkoutLog = async (logId, userId) => {
         try {
           await fetchJson(`/api/workout-log/${logId}`, { method: "DELETE" });
@@ -146,8 +229,7 @@
             <div class="list-item" style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
               <div>
                 <div class="title">${item.name}</div>
-                <div class="meta">${categoryLabel(item.category)} · ${Math.round(item.mets ?? 0)} METs · ${Math.round(item.suggested_minutes ?? 0)}분</div>
-                <div class="detail">분당 ${((item.per_min_kcal ?? 0) || 0).toFixed(1)} kcal · 총 ${Math.round(item.total_kcal ?? 0)} kcal</div>
+                <div class="meta">${categoryLabel(item.category)} · ${Math.round(item.mets ?? 0)} METs · ${Math.round(item.suggested_minutes ?? 0)}분 · 분당 ${((item.per_min_kcal ?? 0) || 0).toFixed(1)} kcal · 총 ${Math.round(item.total_kcal ?? 0)} kcal</div>
               </div>
               <button
                 class="add-workout"
@@ -170,7 +252,7 @@
         try {
           const dash = await fetchJson(`/api/dashboard/${userId}`);
           els.summary.innerHTML = formatSummary(dash, {
-            requested_minutes: lastMinutes,
+            requested_minutes: lastMinutes || "AI 자동",
             assigned_minutes: lastAssignedMinutes,
           });
         } catch (error) {
@@ -185,43 +267,47 @@
         }
         els.list.textContent = "불러오는 중...";
         try {
-          const minutes = Number(els.minutes.value || 20);
-          if (userId !== lastUserId || minutes !== lastMinutes) {
+          // Fixed: Input removed, always auto
+          const queryMinutes = 0;
+          
+          if (userId !== lastUserId || queryMinutes !== lastMinutes) {
             lastWorkouts = [];
             lastUserId = userId;
-            lastMinutes = minutes;
+            lastMinutes = queryMinutes;
           }
-          const params = new URLSearchParams({ minutes });
+          
+          const params = new URLSearchParams();
+          if (queryMinutes > 0) {
+              params.append("minutes", queryMinutes);
+          }
+          
           lastWorkouts.forEach((name) => {
             if (name) params.append("exclude", name);
           });
+          
           const workouts = await fetchJson(`/api/recommend/workout/${userId}?${params.toString()}`);
           els.list.innerHTML = formatWorkout(workouts.items);
           setWorkoutMessage("");
           lastWorkouts = (workouts.items || []).map((item) => item.name);
           lastAssignedMinutes = workouts.assigned_minutes ?? 0;
+          
+          // Update AI display
+          if (workouts.recommended_minutes) {
+             els.aiDisplay.value = `${workouts.recommended_minutes}분`;
+          } else if (workouts.requested_minutes) {
+             els.aiDisplay.value = `${workouts.requested_minutes}분`;
+          }
+          
           await loadSummaryOnly(userId);
         } catch (error) {
-          const message = `에러: ${error.message}`;
-          els.list.textContent = message;
-          setWorkoutMessage(message, "error");
+          console.error(error);
+          alert("추천 로직 에러: " + error.message);
+        } finally {
+          els.list.classList.remove("loading");
         }
-      };
+      }
 
-      const addWorkoutLog = async (payload) => {
-        setWorkoutMessage("기록 중...");
-        try {
-          await fetchJson(`/api/workout-log`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          });
-          setWorkoutMessage("기록 완료!");
-          await Promise.all([loadSummaryOnly(payload.user_id), loadWorkoutLogs(payload.user_id)]);
-        } catch (error) {
-          setWorkoutMessage(`기록 실패: ${error.message}`, "error");
-        }
-      };
+
 
       const reloadAll = async () => {
         const userId = els.user.value.trim();
@@ -231,6 +317,27 @@
         ]);
       };
       els.reload.addEventListener("click", reloadAll);
+      
+      document.getElementById("manual-form").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const userId = els.user.value.trim();
+        if (!userId) {
+          setWorkoutMessage("사용자 ID를 입력하세요.", "error");
+          return;
+        }
+        const formData = new FormData(e.target);
+        const roundOne = (val) => Math.round(Number(val) * 10) / 10;
+        const payload = {
+          user_id: userId,
+          workout_name: formData.get("workout_name"),
+          minutes: roundOne(formData.get("minutes")) || 0,
+          kcal_burn: roundOne(formData.get("kcal_burn")) || 0,
+          mets: 0, // Manual entry doesn't calculate METs automatically yet
+        };
+        addWorkoutLog(payload);
+        e.target.reset();
+      });
+
       els.list.addEventListener("click", (event) => {
         if (!event.target.classList.contains("add-workout")) return;
         const userId = els.user.value.trim();

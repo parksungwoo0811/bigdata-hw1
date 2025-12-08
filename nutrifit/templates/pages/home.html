@@ -11,10 +11,28 @@
   </head>
   <body>
     <div class="wrap">
-      <header>
-        <h1>NutriFit 홈</h1>
-        <p class="muted">사용자 정보를 입력하고 하루 요약을 확인하세요.</p>
-      </header>
+      <!-- Dashboard Hero -->
+      <div class="dashboard-hero">
+        <div class="hero-content">
+          <div class="hero-text">
+            <h1>안녕하세요, <span class="highlight">{{ current_user.profile.name or current_user.id }}</span>님! 👋</h1>
+            <p class="subtitle">오늘도 건강한 하루 시작해보세요.</p>
+          </div>
+          <a href="{{ url_for('auth.logout') }}" class="logout-link">로그아웃</a>
+        </div>
+      </div>
+
+      <!-- AI Coach Section (New Block) -->
+      <section id="ai-coach-card" class="ai-card-section" style="display: none; margin-bottom: 48px;">
+        <h3 style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">
+          <span>🤖</span> 오늘의 AI 코칭
+        </h3>
+        <div style="background: var(--accent-light); padding: 20px; border-radius: 12px; border: 1px solid rgba(74, 132, 120, 0.2);">
+          <p id="ai-coach-message" style="margin: 0; font-size: 16px; line-height: 1.6; color: var(--text-dark);">
+            데이터를 분석 중입니다...
+          </p>
+        </div>
+      </section>
 
       <section class="profile-section">
         <div class="profile-header">
@@ -40,29 +58,30 @@
                 <input
                   id="user-id"
                   type="text"
-                  value="{{ user_id }}"
-                  placeholder="예: user01"
+                  value="{{ current_user.id }}"
+                  readonly
+                  style="opacity: 0.7; cursor: not-allowed;"
                 />
               </label>
               <label>
                 이름
-                <input id="name" type="text" placeholder="홍길동" />
+                <input id="name" type="text" value="{{ current_user.profile.name or '' }}" placeholder="홍길동" />
               </label>
               <label>
                 성별
                 <select id="sex">
                   <option value="">선택</option>
-                  <option value="female">여성</option>
-                  <option value="male">남성</option>
+                  <option value="female" {% if current_user.profile.sex == 'female' %}selected{% endif %}>여성</option>
+                  <option value="male" {% if current_user.profile.sex == 'male' %}selected{% endif %}>남성</option>
                 </select>
               </label>
               <label>
                 나이
-                <input id="age" type="number" min="10" max="90" />
+                <input id="age" type="number" min="10" max="90" value="{{ current_user.profile.age or '' }}" />
               </label>
               <label>
                 키(cm)
-                <input id="height_cm" type="number" min="120" max="220" />
+                <input id="height_cm" type="number" min="120" max="220" value="{{ current_user.profile.height_cm or '' }}" />
               </label>
               <label>
                 몸무게(kg)
@@ -72,6 +91,7 @@
                   min="35"
                   max="2000"
                   step="0.1"
+                  value="{{ current_user.profile.weight_kg or '' }}"
                 />
               </label>
             </div>
@@ -84,30 +104,30 @@
                 활동 수준
                 <select id="activity_level">
                   <option value="">선택</option>
-                  <option value="low">저활동</option>
-                  <option value="moderate">중간 활동</option>
-                  <option value="high">고활동</option>
+                  <option value="low" {% if current_user.profile.activity_level == 'low' %}selected{% endif %}>저활동</option>
+                  <option value="moderate" {% if current_user.profile.activity_level == 'moderate' %}selected{% endif %}>중간 활동</option>
+                  <option value="high" {% if current_user.profile.activity_level == 'high' %}selected{% endif %}>고활동</option>
                 </select>
               </label>
               <label>
                 목표 유형
                 <select id="goal_type">
                   <option value="">선택</option>
-                  <option value="cut">감량</option>
-                  <option value="balance">유지</option>
-                  <option value="gain_muscle">근육 증가</option>
+                  <option value="cut" {% if current_user.profile.goal_type == 'cut' %}selected{% endif %}>감량</option>
+                  <option value="balance" {% if current_user.profile.goal_type == 'balance' %}selected{% endif %}>유지</option>
+                  <option value="gain_muscle" {% if current_user.profile.goal_type == 'gain_muscle' %}selected{% endif %}>근육 증가</option>
                 </select>
               </label>
               <label>
                 목표 칼로리
-                <input id="goal_kcal" type="number" min="1200" max="3500" />
+                <input id="goal_kcal" type="number" min="1200" max="3500" value="{{ current_user.profile.goal_kcal or '' }}" />
               </label>
               <label>
                 운동 추천 분
                 <input
                   id="minutes"
                   type="number"
-                  value="0"
+                  value="{{ current_user.profile.exercise_minutes or 20 }}"
                   min="10"
                   max="300"
                 />
@@ -116,46 +136,42 @@
           </div>
 
           <div class="form-actions">
-            <button id="load-profile" class="ghost">프로필 불러오기</button>
-            <button id="save-profile">프로필 저장</button>
+            <button id="save-profile">내 정보 수정</button>
             <button id="auto-target" class="ghost">추천 목표 계산</button>
           </div>
           <div id="profile-message" class="muted small"></div>
 
-          <div class="profile-group">
-            <h3>저장된 프로필</h3>
-            <div class="profile-grid profile-select-row">
-              <label class="profile-select">
-                프로필 선택
-                <select id="profile-list">
-                  <option value="">저장된 프로필이 없습니다</option>
-                </select>
-              </label>
-              <button id="delete-profile" class="ghost profile-select__button">
-                삭제
-              </button>
-            </div>
-          </div>
         </div>
       </section>
 
       <section>
+        
         <h2>하루 요약</h2>
         <div id="dashboard-summary" class="summary-cards">대기중...</div>
+        
+        <h2>주간 달성 현황 (Streak)</h2>
+        <div class="card">
+          <div id="weekly-streak" style="display: flex; gap: 10px; justify-content: center; align-items: center; flex-wrap: wrap;">
+            <!-- JS will populate this -->
+            <p class="muted">데이터를 불러오는 중...</p>
+          </div>
+          <p id="streak-message" style="text-align: center; margin-top: 10px; color: var(--accent); font-weight: bold;"></p>
+        </div>
+
         <div class="actions-row">
           <a id="meal-link" class="cta-button" href="/meal"
             >식단 추천 확인하기</a
           >
-          <a id="workout-link" class="cta-button secondary" href="/workout"
+          <a id="workout-link" class="cta-button" href="/workout"
             >운동 추천 확인하기</a
           >
-          <a class="cta-button ghost" href="/reports">주간 리포트 보기</a>
+          <a class="cta-button" href="/reports">주간 리포트 보기</a>
         </div>
       </section>
     </div>
 
     <script>
-      const apiKey = "{{ api_key }}";
+      // API Key is no longer needed in frontend as we use session auth
       const els = {
         user: document.getElementById("user-id"),
         name: document.getElementById("name"),
@@ -168,21 +184,28 @@
         goalKcal: document.getElementById("goal_kcal"),
         minutes: document.getElementById("minutes"),
         saveProfile: document.getElementById("save-profile"),
-        loadProfile: document.getElementById("load-profile"),
         autoTarget: document.getElementById("auto-target"),
         profileMessage: document.getElementById("profile-message"),
         dash: document.getElementById("dashboard-summary"),
-        profileList: document.getElementById("profile-list"),
-        mealLink: document.getElementById("meal-link"),
         workoutLink: document.getElementById("workout-link"),
-        deleteProfile: document.getElementById("delete-profile"),
+        mealLink: document.getElementById("meal-link"), // Added mealLink
       };
 
+      // Debug logging
+      console.log("NutriFit Script Loaded");
+
+      // Check elements
+      for (const [key, el] of Object.entries(els)) {
+        if (!el) console.error(`Element not found: ${key}`);
+      }
+
       const fetchJson = async (url, options = {}) => {
-        const headers = { "X-API-Key": apiKey, ...(options.headers || {}) };
-        const res = await fetch(url, { ...options, headers });
+        console.log(`Fetching ${url}...`, options);
+        // No need to send X-API-Key header anymore
+        const res = await fetch(url, options);
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
+          console.error("Fetch error:", err);
           throw new Error(err.error || res.statusText);
         }
         return res.json();
@@ -191,22 +214,29 @@
       const setMessage = (text, type = "muted") => {
         els.profileMessage.textContent = text;
         els.profileMessage.className = `${type} small`;
+        if (type === 'error') alert(text); // Alert on error for visibility
       };
 
       let lastDashboardSignature = null;
       let lastDashboardUserId = null;
 
-      const collectProfile = () => ({
-        user_id: els.user.value.trim(),
-        name: els.name.value.trim() || undefined,
-        sex: els.sex.value || undefined,
-        age: els.age.value ? Number(els.age.value) : undefined,
-        height_cm: els.height.value ? Number(els.height.value) : undefined,
-        weight_kg: els.weight.value ? Number(els.weight.value) : undefined,
-        activity_level: els.activity.value || undefined,
-        goal_type: els.goalType.value || undefined,
-        goal_kcal: els.goalKcal.value ? Number(els.goalKcal.value) : undefined,
-      });
+      const collectProfile = () => {
+        const data = {
+          // user_id is handled by backend session
+          name: els.name.value.trim() || undefined,
+          sex: els.sex.value || undefined,
+          age: els.age.value ? Number(els.age.value) : undefined,
+          height_cm: els.height.value ? Number(els.height.value) : undefined,
+          weight_kg: els.weight.value ? Number(els.weight.value) : undefined,
+          activity_level: els.activity.value || undefined,
+          goal_type: els.goalType.value || undefined,
+          goal_type: els.goalType.value || undefined,
+          goal_kcal: els.goalKcal.value ? Number(els.goalKcal.value) : undefined,
+          exercise_minutes: els.minutes.value ? Number(els.minutes.value) : undefined,
+        };
+        console.log("Collected Profile Data:", data);
+        return data;
+      };
 
       const formatDashboard = (data) => {
         if (!data) return '<p class="muted">데이터 없음</p>';
@@ -262,80 +292,29 @@
         }
       };
 
-      const renderProfileList = (items = []) => {
-        const options = [
-          '<option value="">저장된 프로필을 선택하세요</option>',
-        ];
-        items.forEach((item) => {
-          const label = item.name
-            ? `${item.user_id} (${item.name})`
-            : item.user_id;
-          options.push(`<option value="${item.user_id}">${label}</option>`);
-        });
-        els.profileList.innerHTML = options.join("");
-        const currentId = els.user.value.trim();
-        if (currentId) {
-          els.profileList.value = currentId;
-        }
-      };
 
-      const loadProfileList = async () => {
-        try {
-          const data = await fetchJson(`/api/profile`);
-          renderProfileList(data.items || []);
-        } catch (error) {
-          console.error("프로필 목록 불러오기 실패", error);
-        }
-      };
+
+      // loadProfileList removed
 
       const saveProfile = async () => {
+        console.log("Save Profile Clicked");
         try {
           const payload = collectProfile();
-          if (!payload.user_id) {
-            setMessage("사용자 ID는 필수입니다.", "error");
-            return;
-          }
           await fetchJson(`/api/profile`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
           });
-          setMessage("프로필 저장 완료!");
-          await loadProfileList();
-          els.profileList.value = payload.user_id;
+          setMessage("프로필 수정 완료!");
           await loadSummary(true);
         } catch (error) {
+          console.error("Save Profile Error:", error);
           setMessage(`프로필 저장 실패: ${error.message}`, "error");
         }
       };
 
-      const fetchProfile = async () => {
-        try {
-          const userId = els.user.value.trim();
-          if (!userId) {
-            setMessage("사용자 ID를 입력하세요.", "error");
-            return;
-          }
-          const data = await fetchJson(`/api/profile/${userId}`);
-          els.name.value = data.name || "";
-          els.sex.value = data.sex || "";
-          els.age.value = data.age ?? "";
-          els.height.value = data.height_cm ?? "";
-          els.weight.value = data.weight_kg ?? "";
-          els.activity.value = data.activity_level || "";
-          els.goalType.value = data.goal_type || "";
-          els.goalKcal.value = data.goal_kcal ?? "";
-          if (els.profileList.options.length) {
-            els.profileList.value = userId;
-          }
-          setMessage("프로필 불러오기 완료");
-          await loadSummary(true);
-        } catch (error) {
-          setMessage(`프로필 불러오기 실패: ${error.message}`, "error");
-        }
-      };
-
       const applyAutoTarget = async () => {
+        console.log("Auto Target Clicked");
         try {
           const payload = collectProfile();
           const required = ["sex", "age", "height_cm", "weight_kg"];
@@ -354,60 +333,27 @@
             body: JSON.stringify(requestPayload),
           });
           els.goalKcal.value = Math.round(result.goal_kcal);
+          if (result.exercise_minutes) {
+             els.minutes.value = Math.round(result.exercise_minutes);
+          }
           setMessage(
-            `추천 목표: ${Math.round(result.goal_kcal)} kcal (단백질 ${Math.round(result.protein_g)}g / 지방 ${Math.round(result.fat_g)}g / 탄수 ${Math.round(result.carb_g)}g)`,
+            `추천 목표: ${Math.round(result.goal_kcal)} kcal, 운동 ${Math.round(result.exercise_minutes)}분 (단백질 ${Math.round(result.protein_g)}g / 지방 ${Math.round(result.fat_g)}g / 탄수 ${Math.round(result.carb_g)}g)`,
             "muted"
           );
         } catch (error) {
+          console.error("Auto Target Error:", error);
           setMessage(`추천 목표 계산 실패: ${error.message}`, "error");
         }
       };
 
-      const deleteProfileHandler = async () => {
-        const userId = els.profileList.value || els.user.value.trim();
-        if (!userId) {
-          setMessage("삭제할 사용자 ID를 선택하세요.", "error");
-          return;
-        }
-        if (!confirm(`${userId} 프로필을 삭제할까요?`)) {
-          return;
-        }
-        try {
-          await fetchJson(`/api/profile/${userId}`, { method: "DELETE" });
-          setMessage("프로필 삭제 완료");
-          await loadProfileList();
-          if (els.user.value.trim() === userId) {
-            els.user.value = "";
-            els.name.value = "";
-            els.sex.value = "";
-            els.age.value = "";
-            els.height.value = "";
-            els.weight.value = "";
-            els.activity.value = "";
-            els.goalType.value = "";
-            els.goalKcal.value = "";
-            await loadSummary(true);
-          }
-        } catch (error) {
-          setMessage(`삭제 실패: ${error.message}`, "error");
-        }
-      };
-
       els.saveProfile.addEventListener("click", saveProfile);
-      els.loadProfile.addEventListener("click", fetchProfile);
       els.autoTarget.addEventListener("click", applyAutoTarget);
-      els.deleteProfile.addEventListener("click", deleteProfileHandler);
-      els.profileList.addEventListener("change", () => {
-        const selected = els.profileList.value;
-        if (!selected) {
-          return;
-        }
-        els.user.value = selected;
-        fetchProfile();
-      });
+      
       els.user.addEventListener("change", () => {
         lastDashboardUserId = null;
+        const userId = els.user.value.trim();
         loadSummary(true);
+        loadWeeklyProgress(userId);
       });
       const openWithState = (baseUrl, extraParams = {}) => {
         const userId = els.user.value.trim() || "demo";
@@ -454,8 +400,113 @@
 
       window.addEventListener("pageshow", handlePageShow);
 
-      loadProfileList();
-      loadSummary(true).then(checkAndRefreshDashboard);
+      // Auto-load profile on page load
+      // fetchProfile(); // Removed as data is server-side rendered
+
+
+      const loadWeeklyProgress = async (userId) => {
+        const container = document.getElementById("weekly-streak");
+        const message = document.getElementById("streak-message");
+        if (!userId) {
+          container.innerHTML = '<p class="muted">사용자 ID를 입력하세요.</p>';
+          message.textContent = "";
+          return;
+        }
+
+        try {
+          const data = await fetchJson(`/api/reports/${userId}?days=7`);
+          const days = data.days || [];
+          // Ensure we have 7 days (fill missing if API returns partial?)
+          // API returns last 7 days including today.
+          
+          let html = '';
+          let streak = 0;
+          let currentStreak = 0;
+
+          // days are returned essentially [today, yesterday, ...] order or reverse?
+          // recommend.py: for i in range(days - 1, -1, -1): append... So it is oldest to newest.
+          // Let's verify order. range(6, -1, -1) -> 6 days ago ... 0 days ago.
+          // Correct, oldest first.
+
+          // Calculate streak from newest (end of array) backwards
+          for (let i = days.length - 1; i >= 0; i--) {
+            if (days[i].status === 'good') {
+              currentStreak++;
+            } else {
+              if (i === days.length - 1) { 
+                 // If today is bad, maybe don't break streak yet? 
+                 // But strictly speaking, streak is broken. 
+                 // Let's stick to strict logic for now.
+                 break;
+              }
+              break;
+            }
+          }
+          
+          // Render HTML - we want to show Mon, Tue... 
+          // API returns date string. Let's format it.
+          const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+          
+          days.forEach(day => {
+            const dateObj = new Date(day.date);
+            const dayName = dayNames[dateObj.getDay()];
+            const isSuccess = day.status === 'good';
+            
+            const color = isSuccess ? 'var(--accent)' : '#2c3147';
+            const opacity = isSuccess ? '1' : '0.5';
+            
+            html += `
+              <div style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
+                <div style="width: 32px; height: 32px; border-radius: 50%; background: ${color}; opacity: ${opacity}; display: flex; align-items: center; justify-content: center; font-size: 14px; color: #fff; font-weight: bold;">
+                  ${isSuccess ? '✓' : ''}
+                </div>
+                <span class="small muted">${dayName}</span>
+              </div>
+            `;
+          });
+
+          container.innerHTML = html;
+          message.textContent = currentStreak > 0 
+            ? `현재 ${currentStreak}일 연속 목표 달성! 🔥` 
+            : "오늘부터 목표를 달성해보세요! 💪";
+
+        } catch (error) {
+          console.error("Streak load error:", error);
+          container.innerHTML = '<p class="muted warning">데이터 로드 실패</p>';
+        }
+      };
+
+
+
+
+      const loadAiCoach = async (userId) => {
+        const card = document.getElementById("ai-coach-card");
+        const msg = document.getElementById("ai-coach-message");
+        if (!userId) return;
+
+        // Show card in loading state
+        card.style.display = "block";
+        
+        try {
+          // Add a small delay/loading effect if needed, or just fetch
+          const data = await fetchJson(`/api/recommend/coach/${userId}`);
+          if (data.message) {
+            msg.textContent = data.message;
+          } else {
+             card.style.display = "none";
+          }
+        } catch (error) {
+          console.error("AI Coach Error:", error);
+          msg.textContent = "AI 코칭을 불러올 수 없습니다. (잠시 후 다시 시도해주세요)";
+        }
+      };
+
+      loadSummary(true).then(() => {
+        checkAndRefreshDashboard();
+        const uid = els.user.value.trim();
+        loadWeeklyProgress(uid);
+        loadAiCoach(uid);
+      });
     </script>
   </body>
 </html>

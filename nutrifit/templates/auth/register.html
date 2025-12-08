@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>회원가입 - NutriFit</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-card">
+            <h1 class="auth-title">NutriFit 회원가입</h1>
+            
+            {% with messages = get_flashed_messages() %}
+                {% if messages %}
+                    <div class="flash-messages">
+                        {% for message in messages %}
+                            <p>{{ message }}</p>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            {% endwith %}
+
+            <form method="POST">
+                <div class="form-group">
+            <label for="user_id">아이디</label>
+            <input type="text" id="user_id" name="user_id" required>
+        </div>
+        <div class="form-group">
+            <label for="password">비밀번호</label>
+            <input type="password" id="password" name="password" required>
+        </div>
+        
+        <hr>
+        <h3>기본 정보</h3>
+        
+        <div class="form-group">
+            <label for="name">이름 (닉네임)</label>
+            <input type="text" id="name" name="name" required>
+        </div>
+        
+        <div class="form-row">
+            <div class="form-group">
+                <label for="age">나이</label>
+                <input type="number" id="age" name="age" required>
+            </div>
+            <div class="form-group">
+                <label for="sex">성별</label>
+                <select id="sex" name="sex" required>
+                    <option value="male">남성</option>
+                    <option value="female">여성</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label for="height_cm">키 (cm)</label>
+                <input type="number" step="0.1" id="height_cm" name="height_cm" required>
+            </div>
+            <div class="form-group">
+                <label for="weight_kg">몸무게 (kg)</label>
+                <input type="number" step="0.1" id="weight_kg" name="weight_kg" required>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="activity_level">활동량</label>
+            <select id="activity_level" name="activity_level">
+                <option value="low">적음 (운동 안함)</option>
+                <option value="moderate" selected>보통 (주 1-3회)</option>
+                <option value="high">많음 (주 4회 이상)</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="goal_type">목표</label>
+            <select id="goal_type" name="goal_type">
+                <option value="cut">체중 감량 (Cut)</option>
+                <option value="balance" selected>유지 (Balance)</option>
+                <option value="gain_muscle">근육 증가 (Gain)</option>
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label for="goal_kcal">목표 칼로리 (선택사항)</label>
+            <input type="number" id="goal_kcal" name="goal_kcal" placeholder="자동 계산됨">
+        </div>
+                <button type="submit" class="btn-submit">가입하기</button>
+            </form>
+
+            <div class="auth-links">
+                이미 계정이 있으신가요? <a href="{{ url_for('auth.login') }}">로그인</a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

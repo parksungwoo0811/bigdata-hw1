@@ -1,4 +1,5 @@
 from flask import Blueprint, current_app, redirect, render_template, request, url_for
+from flask_login import login_required, current_user
 
 web_bp = Blueprint("web", __name__)
 
@@ -8,35 +9,32 @@ def legacy_dashboard():
     return redirect(url_for("web.home_page"))
 
 
+
+
+
 @web_bp.get("/home")
+@login_required
 def home_page():
-    user_id = request.args.get("user_id", "demo")
-    api_key = current_app.config.get("API_KEY")
-    return render_template("pages/home.html", user_id=user_id, api_key=api_key)
+    return render_template("pages/home.html", profile=current_user.profile)
 
 
 @web_bp.get("/meal")
+@login_required
 def meal_page():
-    user_id = request.args.get("user_id", "demo")
-    api_key = current_app.config.get("API_KEY")
-    return render_template("pages/meal.html", user_id=user_id, api_key=api_key)
+    return render_template("pages/meal.html")
 
 
 @web_bp.get("/workout")
+@login_required
 def workout_page():
-    user_id = request.args.get("user_id", "demo")
     minutes = request.args.get("minutes", "20")
-    api_key = current_app.config.get("API_KEY")
-    return render_template(
-        "pages/workout.html", user_id=user_id, minutes=minutes, api_key=api_key
-    )
+    return render_template("pages/workout.html", minutes=minutes)
 
 
 @web_bp.get("/reports")
+@login_required
 def reports_page():
-    user_id = request.args.get("user_id", "demo")
-    api_key = current_app.config.get("API_KEY")
-    return render_template("pages/reports.html", user_id=user_id, api_key=api_key)
+    return render_template("pages/reports.html", user_id=current_user.id)
 
 
 @web_bp.get("/hw1")
